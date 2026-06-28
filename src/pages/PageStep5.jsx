@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Card, Btn, Divider } from '../components/ui';
 import {
+  getExhibitImage,
   getExhibitMaterial,
   getExhibitName,
-  getExhibitOther,
   getExhibitPlace,
   getExhibitTime,
 } from '../utils/exhibitFields';
@@ -174,6 +174,28 @@ export const PageStep5 = ({
 
   const currentSection = getSectionContent(activeSection);
 
+  const getExhibitId = (exhibit) => (
+    exhibit?.id || exhibit?.ID || exhibit?.编号 || exhibit?.exhibit_id || exhibit?.original_index || ''
+  );
+
+  const escapeHtml = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  const formatTableCell = (value) => String(value || '-')
+    .replace(/\|/g, '&#124;')
+    .replace(/\r?\n/g, '<br>')
+    .trim() || '-';
+
+  const getExhibitImageTag = (exhibit, size = 72) => {
+    const imageUrl = getExhibitImage(exhibit);
+    if (!imageUrl) return '-';
+    const alt = escapeHtml(getExhibitName(exhibit) || '展品图');
+    return `<img src="${escapeHtml(imageUrl)}" alt="${alt}" width="${size}" style="width:${size}px;max-height:${size}px;object-fit:cover;border-radius:6px;" />`;
+  };
+
   const handleComplete = () => {
     setShowCompleteModal(true);
   };
@@ -220,10 +242,10 @@ export const PageStep5 = ({
 
       if (section.exhibits && section.exhibits.length > 0) {
         fullContent += '### 展品列表\n\n';
-        fullContent += '| ID | 名称 | 时间 | 地点 | 材质 | 其他 | 推荐权重 | 来源 |\n';
-        fullContent += '|---|---|---|---|---|---|---|---|\n';
+        fullContent += '| 文物名称 | 时间 | 地点 | 材质 | 展品图 | 展品ID |\n';
+        fullContent += '|---|---|---|---|---|---|\n';
         section.exhibits.forEach(ex => {
-          fullContent += `| ${ex.id || '-'} | ${getExhibitName(ex) || '-'} | ${getExhibitTime(ex) || '-'} | ${getExhibitPlace(ex) || '-'} | ${getExhibitMaterial(ex) || '-'} | ${getExhibitOther(ex) || '-'} | ${ex.stars || '-'} | ${ex.ctx || ex.source || '-'} |\n`;
+          fullContent += `| ${formatTableCell(getExhibitName(ex))} | ${formatTableCell(getExhibitTime(ex))} | ${formatTableCell(getExhibitPlace(ex))} | ${formatTableCell(getExhibitMaterial(ex))} | ${getExhibitImageTag(ex)} | ${formatTableCell(getExhibitId(ex))} |\n`;
         });
         fullContent += '\n';
       }
@@ -282,8 +304,9 @@ export const PageStep5 = ({
             h2 { font-size: 18px; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-top: 24px; }
             h3 { font-size: 14px; margin-top: 16px; }
             table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; vertical-align: middle; }
             th { background: #f5f5f5; }
+            td img { width: 72px; max-height: 72px; object-fit: cover; border-radius: 6px; display: block; }
             hr { border: none; border-top: 1px solid #ccc; margin: 20px 0; }
           </style>
         </head>
@@ -291,13 +314,45 @@ export const PageStep5 = ({
       </html>
     `);
     printWindow.document.close();
-    printWindow.print();
+    const images = Array.from(printWindow.document.images || []);
+    const waitForImages = images.map((img) => (
+      img.complete
+        ? Promise.resolve()
+        : new Promise((resolve) => {
+            img.onload = resolve;
+            img.onerror = resolve;
+          })
+    ));
+    Promise.all(waitForImages).finally(() => {
+      printWindow.focus();
+      printWindow.print();
+    });
     setShowExport(false);
   };
 
   const downloadWord = () => {
     const content = generateFullOutline();
-    const blob = new Blob([content], { type: 'application/msword;charset=utf-8' });
+    const htmlContent = convertMarkdownToHtml(content);
+    const wordHtml = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word">
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(projectTitle)}</title>
+          <style>
+            body { font-family: "SimSun", "Songti SC", serif; line-height: 1.8; }
+            h1 { font-size: 24px; text-align: center; }
+            h2 { font-size: 18px; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-top: 24px; }
+            h3 { font-size: 14px; margin-top: 16px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; vertical-align: middle; }
+            th { background: #f5f5f5; }
+            td img { width: 72px; max-height: 72px; object-fit: cover; border-radius: 6px; display: block; }
+          </style>
+        </head>
+        <body>${htmlContent}</body>
+      </html>
+    `;
+    const blob = new Blob(['\ufeff', wordHtml], { type: 'application/msword;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -467,7 +522,7 @@ export const PageStep5 = ({
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                     <thead>
                       <tr style={{ background: C.bgElevated || C.bgSecondary }}>
-                        {["名称", "时间", "地点", "材质", "其他"].map(h => (
+                        {["文物名称", "时间", "地点", "材质", "展品图", "展品ID"].map(h => (
                           <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 700, color: C.textSecondary, borderBottom: `1px solid ${C.border}` }}>{h}</th>
                         ))}
                       </tr>
@@ -479,7 +534,16 @@ export const PageStep5 = ({
                           <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{getExhibitTime(ex) || '-'}</td>
                           <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{getExhibitPlace(ex) || '-'}</td>
                           <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{getExhibitMaterial(ex) || '-'}</td>
-                          <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{getExhibitOther(ex) || '-'}</td>
+                          <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>
+                            {getExhibitImage(ex) ? (
+                              <img
+                                src={getExhibitImage(ex)}
+                                alt={getExhibitName(ex) || '展品图'}
+                                style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: `1px solid ${C.border}`, display: "block" }}
+                              />
+                            ) : '-'}
+                          </td>
+                          <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary, wordBreak: "break-all" }}>{getExhibitId(ex) || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -506,7 +570,7 @@ export const PageStep5 = ({
                 <input type="radio" name="format" checked={selectedFormat === 'Markdown'} onChange={() => handleExport('Markdown')} /> Markdown (.md)
               </label>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", marginTop: 6 }}>
-                <input type="radio" name="format" checked={selectedFormat === 'Word'} onChange={() => handleExport('Word')} /> Word (.docx)
+                <input type="radio" name="format" checked={selectedFormat === 'Word'} onChange={() => handleExport('Word')} /> Word (.doc)
               </label>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", marginTop: 6 }}>
                 <input type="radio" name="format" checked={selectedFormat === 'PDF'} onChange={() => handleExport('PDF')} /> PDF (.pdf)
