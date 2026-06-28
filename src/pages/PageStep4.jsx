@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Btn, Divider, Tag, Modal } from '../components/ui';
 import { api } from '../api/client';
 
@@ -39,7 +39,7 @@ const RichTextToolbar = ({ onFormat, editorRef, C }) => (
   </div>
 );
 
-export const PageStep4 = ({ 
+export const PageStep4 = ({
   setPage,
   goNextStep,
   goPrevStep,
@@ -60,6 +60,14 @@ export const PageStep4 = ({
   const [regenerateModal, setRegenerateModal] = useState(null);
   const [regeneratingKey, setRegeneratingKey] = useState(null);
   const editorRef = useRef(null);
+  const currentNarrative = narrativeOptions[selectedNarrative] || { title: '', desc: '' };
+  const infoCardStyle = {
+    padding: "14px 16px",
+    borderRadius: 16,
+    border: `1px solid ${C.border}`,
+    background: C.bgElevated || C.bgSecondary,
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.04)",
+  };
 
   useEffect(() => {
     if (currentProject) {
@@ -103,11 +111,11 @@ export const PageStep4 = ({
 
   const confirmRegenerate = async () => {
     if (!regenerateModal) return;
-    
+
     const sectionKey = regenerateModal.key;
     setRegeneratingKey(sectionKey);
     setRegenerateModal(null);
-    
+
     try {
       const narrative = narrativeOptions[selectedNarrative] || { title: '', desc: '' };
       const narrativeRhythm = currentProject?.llmParams?.narrative_rhythm || null;
@@ -195,56 +203,121 @@ export const PageStep4 = ({
   };
 
   return (
-    <main style={{ padding: "28px 36px", maxWidth: 900 }}>
+    <main style={{ padding: "28px 36px" }}>
       {isGenerating && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(255,255,255,.9)",
+          position: "fixed", inset: 0, background: "rgba(245, 242, 236, 0.84)",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          zIndex: 300,
+          zIndex: 300, backdropFilter: "blur(4px)",
         }}>
-          <div style={{ 
-            width: 48, height: 48, border: `4px solid ${C.border}`, borderTopColor: C.accentPrimary,
-            borderRadius: "50%", animation: "spin 1s linear infinite",
-          }} />
-          <style>{`
-            @keyframes spin { to { transform: rotate(360deg); } }
-          `}</style>
-          <div style={{ marginTop: 20, fontSize: 15, color: C.textPrimary, fontWeight: 600 }}>
-            AI 正在生成策展文本...
-          </div>
-          <div style={{ marginTop: 8, fontSize: 13, color: C.textSecondary }}>
-            正在为每个单元生成文本内容
+          <div style={{
+            width: 420,
+            maxWidth: "calc(100vw - 32px)",
+            padding: "28px 24px",
+            borderRadius: 22,
+            background: C.bgPrimary,
+            border: `1px solid ${C.border}`,
+            boxShadow: "0 24px 60px rgba(15, 23, 42, 0.12)",
+            textAlign: "center",
+          }}>
+            <div style={{
+              width: 48, height: 48, border: `4px solid ${C.border}`, borderTopColor: C.accentPrimary,
+              borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto",
+            }} />
+            <style>{`
+              @keyframes spin { to { transform: rotate(360deg); } }
+            `}</style>
+            <div style={{ marginTop: 20, fontSize: 16, color: C.textPrimary, fontWeight: 700 }}>
+              AI 正在生成策展文本
+            </div>
+            <div style={{ marginTop: 8, fontSize: 13, color: C.textSecondary, lineHeight: 1.7 }}>
+              正在为序言、各单元与尾声组织文稿，请稍候片刻。
+            </div>
           </div>
         </div>
       )}
-      
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, fontFamily: "'Noto Serif SC', serif" }}>
-            Step 4：审核并编辑策展文本
-          </h1>
-          <p style={{ color: C.textSecondary, fontSize: 14, margin: "6px 0 0" }}>
-            AI 已生成序言和各单元文本，请逐段审核
-          </p>
+
+      <div style={{
+        padding: "24px 28px",
+        borderRadius: 24,
+        border: `1px solid ${C.border}`,
+        background: `linear-gradient(180deg, ${C.bgElevated || C.bgSecondary} 0%, ${C.bgSecondary} 100%)`,
+        boxShadow: "0 18px 40px rgba(15, 23, 42, 0.05)",
+        marginBottom: 24,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ maxWidth: 760 }}>
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 12px",
+              borderRadius: 999,
+              background: `${C.accentPrimary}12`,
+              border: `1px solid ${C.accentPrimary}18`,
+              color: C.accentPrimary,
+              fontSize: 12,
+              fontWeight: 700,
+              marginBottom: 14,
+            }}>
+              Step 4 / 5
+            </div>
+            <h1 style={{ fontSize: 26, fontWeight: 700, color: C.textPrimary, fontFamily: "var(--font-serif)", margin: 0 }}>
+              审核并编辑策展文本
+            </h1>
+            <p style={{ color: C.textSecondary, fontSize: 14, margin: "10px 0 0", lineHeight: 1.8, maxWidth: 720 }}>
+              AI 已生成序言、单元文案与尾声。你可以逐段审核、直接编辑，或对单段进行重新生成。
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 10, fontSize: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ background: C.aiGenerated, padding: "5px 10px", borderRadius: 999 }}>蓝色背景为 AI 生成原文</span>
+            <span style={{ background: C.humanEdited, padding: "5px 10px", borderRadius: 999 }}>黄色背景为您已修改</span>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 12, fontSize: 12, alignItems: "center" }}>
-          <span style={{ background: C.aiGenerated, padding: "4px 10px", borderRadius: 4 }}>蓝色背景为AI生成原文</span>
-          <span style={{ background: C.humanEdited, padding: "4px 10px", borderRadius: 4 }}>黄色背景为您已修改</span>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginTop: 20 }}>
+          <div style={infoCardStyle}>
+            <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>当前叙事方向</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary, lineHeight: 1.6 }}>
+              {currentNarrative?.title || currentNarrative?.label || '未命名方向'}
+            </div>
+          </div>
+          <div style={infoCardStyle}>
+            <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>文本段落</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{textSections.length || 0} 段</div>
+          </div>
+          <div style={infoCardStyle}>
+            <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>已人工修改</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>
+              {textSections.filter(sec => sec.edited).length} 段
+            </div>
+          </div>
+          <div style={infoCardStyle}>
+            <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>展品支撑</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>
+              {Object.values(keptExhibits || {}).filter(Array.isArray).reduce((sum, list) => sum + list.length, 0)} 件
+            </div>
+          </div>
         </div>
       </div>
 
-      <Divider style={{ margin: "20px 0" }} />
-
       {textSections.map((sec, i) => (
-        <div key={sec.key} style={{ marginBottom: 28 }}>
+        <div key={sec.key} style={{
+          marginBottom: 24,
+          borderRadius: 22,
+          border: `1px solid ${C.border}`,
+          background: C.bgElevated || C.bgSecondary,
+          boxShadow: "0 14px 30px rgba(15, 23, 42, 0.04)",
+          padding: "18px 20px",
+        }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <h2 style={{ fontSize: 16, fontWeight: 700, color: C.textPrimary, fontFamily: "'Noto Serif SC', serif" }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, fontFamily: "var(--font-serif)", margin: 0 }}>
                 {sec.title}
               </h2>
               {sec.edited && <Tag label="[已修改]" color={C.humanEdited} textColor={C.accentSecondary} />}
             </div>
-            <span 
+            <span
               onClick={() => handleRegenerate(sec.key)}
               style={{ color: C.accentPrimary, cursor: "pointer", fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}
               disabled={regeneratingKey !== null}
@@ -254,7 +327,7 @@ export const PageStep4 = ({
           </div>
 
           {editing === sec.key ? (
-            <div style={{ border: `1.5px solid ${C.accentPrimary}`, borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ border: `1.5px solid ${C.accentPrimary}`, borderRadius: 16, overflow: 'hidden', background: C.bgPrimary }}>
               <RichTextToolbar onFormat={handleFormat} editorRef={editorRef} C={C} />
               <div
                 ref={editorRef}
@@ -268,7 +341,7 @@ export const PageStep4 = ({
                 style={{
                   width: "100%", padding: "14px 16px", boxSizing: "border-box",
                   fontSize: 14, lineHeight: 1.8, minHeight: 120,
-                  fontFamily: "'Noto Sans SC', sans-serif", resize: "vertical",
+                  fontFamily: "var(--font-serif)", resize: "vertical",
                   background: C.humanEdited, outline: 'none',
                 }}
               />
@@ -277,9 +350,9 @@ export const PageStep4 = ({
             <div
               onClick={() => setEditing(sec.key)}
               style={{
-                padding: "14px 16px", borderRadius: 6, cursor: "text",
+                padding: "16px 18px", borderRadius: 16, cursor: "text",
                 background: sec.edited ? C.humanEdited : C.aiGenerated,
-                fontSize: 14, lineHeight: 1.8, color: C.textPrimary,
+                fontSize: 14, lineHeight: 1.8, color: C.textPrimary, fontFamily: "var(--font-serif)",
                 border: `1px solid ${sec.edited ? C.accentSecondary + "44" : C.accentPrimary + "22"}`,
               }}>
               {sec.text}
@@ -291,7 +364,7 @@ export const PageStep4 = ({
             const exhibitsForSection = keptExhibits?.[unitId] || [];
             const hasExhibits = exhibitsForSection.length > 0;
             return hasExhibits && (
-              <div style={{ marginTop: 10, paddingLeft: 8 }}>
+              <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 14, background: C.bgPrimary, border: `1px solid ${C.border}` }}>
                 <div style={{ fontSize: 12, color: C.textSecondary, fontWeight: 700, marginBottom: 4 }}>展品摘要：</div>
                 <div style={{ fontSize: 12, color: C.textSecondary, lineHeight: 1.6 }}>
                   {exhibitsForSection.slice(0, 3).map((ex, idx) => (
@@ -302,16 +375,34 @@ export const PageStep4 = ({
               </div>
             );
           })()}
-          <Divider />
         </div>
       ))}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-        <Btn variant="ghost" onClick={goPrevStep}>← 返回 Step3</Btn>
-        <Btn onClick={goNextStep}>确认文本，生成完整大纲 →</Btn>
-      </div>
-      <div style={{ marginTop: 8, fontSize: 12, color: C.warning }}>
-        ⚠️ 确认后将进入完整大纲，请确保文本已审核完毕
+      <div style={{
+        marginTop: 8,
+        padding: "18px 20px",
+        borderRadius: 20,
+        border: `1px solid ${C.border}`,
+        background: C.bgElevated || C.bgSecondary,
+        boxShadow: "0 12px 28px rgba(15, 23, 42, 0.04)",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 16,
+        flexWrap: "wrap",
+      }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>
+            确认文本后进入完整大纲
+          </div>
+          <div style={{ marginTop: 4, fontSize: 12, color: C.warning }}>
+            请先确认各段文字的表述、结构与学术准确性，再进入最终交付页。
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <Btn variant="ghost" onClick={goPrevStep}>← 返回 Step3</Btn>
+          <Btn onClick={goNextStep}>确认文本，生成完整大纲 →</Btn>
+        </div>
       </div>
 
       {regenerateModal && (
@@ -332,19 +423,33 @@ export const PageStep4 = ({
 
       {regeneratingKey && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(255,255,255,.9)",
+          position: "fixed", inset: 0, background: "rgba(245, 242, 236, 0.84)",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-          zIndex: 350,
+          zIndex: 350, backdropFilter: "blur(4px)",
         }}>
-          <div style={{ 
-            width: 40, height: 40, border: `3px solid ${C.border}`, borderTopColor: C.accentPrimary,
-            borderRadius: "50%", animation: "spin 1s linear infinite",
-          }} />
-          <style>{`
-            @keyframes spin { to { transform: rotate(360deg); } }
-          `}</style>
-          <div style={{ marginTop: 16, fontSize: 14, color: C.textPrimary }}>
-            正在重新生成...
+          <div style={{
+            width: 360,
+            maxWidth: "calc(100vw - 32px)",
+            padding: "24px 20px",
+            borderRadius: 22,
+            background: C.bgPrimary,
+            border: `1px solid ${C.border}`,
+            boxShadow: "0 24px 60px rgba(15, 23, 42, 0.12)",
+            textAlign: "center",
+          }}>
+            <div style={{
+              width: 40, height: 40, border: `3px solid ${C.border}`, borderTopColor: C.accentPrimary,
+              borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto",
+            }} />
+            <style>{`
+              @keyframes spin { to { transform: rotate(360deg); } }
+            `}</style>
+            <div style={{ marginTop: 16, fontSize: 14, color: C.textPrimary, fontWeight: 700 }}>
+              正在重新生成
+            </div>
+            <div style={{ marginTop: 8, fontSize: 12, color: C.textSecondary }}>
+              请稍候，系统正在更新当前段落内容。
+            </div>
           </div>
         </div>
       )}

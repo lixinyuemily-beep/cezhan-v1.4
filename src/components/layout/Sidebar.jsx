@@ -1,7 +1,6 @@
-import React from 'react';
 import { Divider } from '../ui';
 
-const MenuIcon = ({ type, color = "#fff" }) => {
+const MenuIcon = ({ type }) => {
   const iconStyle = { width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center" };
   
   switch (type) {
@@ -45,7 +44,6 @@ export const Sidebar = ({
   currentStep,
   currentProject,
   navigateTo,
-  setCurrentPage,
   createNewProject,
   theme,
 }) => {
@@ -75,17 +73,33 @@ export const Sidebar = ({
 
   return (
     <aside style={{
-      width: 220, minHeight: "100vh", background: C.bgSidebar,
-      display: "flex", flexDirection: "column", padding: "0",
-      position: "fixed", top: 0, left: 0, zIndex: 100,
+      width: 232,
+      minHeight: "100vh",
+      background: `linear-gradient(180deg, ${C.bgSidebar} 0%, ${C.sidebarAccent || C.bgSidebar} 100%)`,
+      display: "flex",
+      flexDirection: "column",
+      padding: "0",
+      position: "fixed",
+      top: 0,
+      left: 0,
+      zIndex: 100,
+      boxShadow: C.shadowMd,
+      borderRight: `1px solid rgba(255,255,255,0.06)`,
     }}>
-      <div style={{ padding: "20px 20px 16px", display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 32, height: 32, background: C.accentPrimary, borderRadius: 6, flexShrink: 0 }} />
-        <span style={{ color: "#fff", fontWeight: 700, fontSize: 13, fontFamily: "'Noto Serif SC', serif" }}>
+      <div style={{ padding: "24px 22px 18px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{
+          width: 36,
+          height: 36,
+          background: `linear-gradient(135deg, ${C.accentSecondary} 0%, ${C.accentPrimary} 100%)`,
+          borderRadius: 12,
+          flexShrink: 0,
+          boxShadow: "inset 0 1px 1px rgba(255,255,255,0.22)",
+        }} />
+        <span style={{ color: "#fff", fontWeight: 700, fontSize: 14, letterSpacing: "0.03em", fontFamily: "var(--font-serif)" }}>
           智能策展助手
         </span>
       </div>
-      <Divider style={{ margin: "0 0 4px", background: "rgba(255,255,255,.1)" }} />
+      <Divider style={{ margin: "0 0 8px", background: "rgba(255,255,255,.08)" }} />
 
       {menuItems.map(item => (
         <button
@@ -93,13 +107,19 @@ export const Sidebar = ({
           onClick={() => handleNavClick(item.key)}
           style={{
             display: "flex", alignItems: "center", gap: 10,
-            padding: "10px 20px", border: "none", cursor: "pointer",
-            background: currentPage === item.key ? C.accentPrimary : "transparent",
-            color: "#fff", fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif",
-            borderRadius: currentPage === item.key ? 6 : 0,
-            margin: currentPage === item.key ? "2px 8px" : "2px 0",
+            padding: "12px 16px",
+            border: "none",
+            cursor: "pointer",
+            background: currentPage === item.key ? "rgba(255,255,255,0.11)" : "transparent",
+            color: "#fff",
+            fontSize: 13,
+            fontWeight: currentPage === item.key ? 600 : 500,
+            fontFamily: "var(--font-ui)",
+            borderRadius: currentPage === item.key ? 12 : 0,
+            margin: currentPage === item.key ? "2px 10px" : "2px 0",
             textAlign: "left",
-            transition: "background 0.15s",
+            transition: "background 0.15s, transform 0.15s",
+            boxShadow: currentPage === item.key ? "inset 0 0 0 1px rgba(255,255,255,0.08)" : "none",
           }}
         >
           <MenuIcon type={item.iconType} />&nbsp;&nbsp;{item.label}
@@ -109,11 +129,17 @@ export const Sidebar = ({
       {showProjectInfo && (
         <>
           <Divider style={{ margin: "12px 0", background: "rgba(255,255,255,.1)" }} />
-          <div style={{ padding: "0 20px" }}>
-            <div style={{ color: C.textPlaceholder, fontSize: 12, marginBottom: 4 }}>
+          <div style={{
+            margin: "0 14px",
+            padding: "14px 14px 12px",
+            borderRadius: 14,
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}>
+            <div style={{ color: "rgba(255,255,255,0.82)", fontSize: 12, lineHeight: 1.5, marginBottom: 6 }}>
               {currentProject?.title || '未命名策展项目'}
             </div>
-            <div style={{ color: C.accentSecondary, fontSize: 11, fontWeight: 700 }}>
+            <div style={{ color: C.accentSecondary, fontSize: 11, fontWeight: 700, letterSpacing: "0.04em" }}>
               Step {currentStep} / 5
             </div>
           </div>
@@ -121,15 +147,20 @@ export const Sidebar = ({
       )}
 
       <div style={{ flex: 1 }} />
-      <Divider style={{ margin: "0", background: "rgba(255,255,255,.1)" }} />
-      <div style={{ padding: "4px 8px", display: "flex", gap: 4 }}>
+      <Divider style={{ margin: "0", background: "rgba(255,255,255,.08)" }} />
+      <div style={{ padding: "8px 10px", display: "flex", gap: 6 }}>
         <button
           onClick={() => navigateTo('settings')}
           style={{
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
             padding: "10px", border: "none", cursor: "pointer",
-            background: "transparent", color: C.textPlaceholder, fontSize: 13,
-            borderRadius: 6, transition: "background 0.15s",
+            background: currentPage === 'settings' ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.03)",
+            color: currentPage === 'settings' ? "#fff" : "rgba(255,255,255,0.74)",
+            fontSize: 12,
+            fontWeight: currentPage === 'settings' ? 700 : 500,
+            borderRadius: 10,
+            transition: "background 0.15s, color 0.15s",
+            boxShadow: currentPage === 'settings' ? "inset 0 0 0 1px rgba(255,255,255,0.08)" : "none",
           }}
         >
           <MenuIcon type="settings" /> 设置
@@ -139,8 +170,13 @@ export const Sidebar = ({
           style={{
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
             padding: "10px", border: "none", cursor: "pointer",
-            background: "transparent", color: C.textPlaceholder, fontSize: 13,
-            borderRadius: 6, transition: "background 0.15s",
+            background: currentPage === 'help' ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.03)",
+            color: currentPage === 'help' ? "#fff" : "rgba(255,255,255,0.74)",
+            fontSize: 12,
+            fontWeight: currentPage === 'help' ? 700 : 500,
+            borderRadius: 10,
+            transition: "background 0.15s, color 0.15s",
+            boxShadow: currentPage === 'help' ? "inset 0 0 0 1px rgba(255,255,255,0.08)" : "none",
           }}
         >
           <MenuIcon type="help" /> 帮助

@@ -60,6 +60,7 @@ async def recommend_exhibits(request: RecommendRequest):
             exhibit_pool=request.exhibit_pool,
             unit_theme=request.unit_theme,
             unit_description=request.unit_description,
+            min_count=request.min_count,
             max_count=request.max_count
         )
         return RecommendResponse(recommendations=recommendations)
@@ -147,4 +148,4 @@ async def generate_outline(request: OutlineRequest):
 @router.get("/health")
 async def ai_health():
     """AI 服务健康检查"""
-    return {"status": "ok", "service": "yuanjing"}
+    return {"status": "ok", "service": "deepseek"}

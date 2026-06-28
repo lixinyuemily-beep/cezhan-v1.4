@@ -39,10 +39,13 @@ class DatabaseService:
         return query.execute().data or []
     
     @classmethod
-    def get_project(cls, project_id: str) -> Optional[Dict]:
+    def get_project(cls, project_id: str, user_id: Optional[str] = None) -> Optional[Dict]:
         """获取单个项目"""
         client = cls.get_client()
-        result = client.table(settings.table_projects).select("*").eq("id", project_id).execute()
+        query = client.table(settings.table_projects).select("*").eq("id", project_id)
+        if user_id:
+            query = query.eq("user_id", user_id)
+        result = query.execute()
         return result.data[0] if result.data else None
     
     @classmethod
@@ -53,17 +56,23 @@ class DatabaseService:
         return result.data[0] if result.data else None
     
     @classmethod
-    def update_project(cls, project_id: str, project_data: Dict) -> Dict:
+    def update_project(cls, project_id: str, project_data: Dict, user_id: Optional[str] = None) -> Dict:
         """更新项目"""
         client = cls.get_client()
-        result = client.table(settings.table_projects).update(project_data).eq("id", project_id).execute()
+        query = client.table(settings.table_projects).update(project_data).eq("id", project_id)
+        if user_id:
+            query = query.eq("user_id", user_id)
+        result = query.execute()
         return result.data[0] if result.data else None
     
     @classmethod
-    def delete_project(cls, project_id: str) -> bool:
+    def delete_project(cls, project_id: str, user_id: Optional[str] = None) -> bool:
         """删除项目"""
         client = cls.get_client()
-        result = client.table(settings.table_projects).delete().eq("id", project_id).execute()
+        query = client.table(settings.table_projects).delete().eq("id", project_id)
+        if user_id:
+            query = query.eq("user_id", user_id)
+        result = query.execute()
         return len(result.data) > 0 if result.data else False
     
     # ==================== 单元操作 ====================
@@ -74,6 +83,13 @@ class DatabaseService:
         client = cls.get_client()
         result = client.table(settings.table_units).select("*").eq("project_id", project_id).order("order").execute()
         return result.data or []
+
+    @classmethod
+    def get_unit(cls, unit_id: str) -> Optional[Dict]:
+        """获取单个单元"""
+        client = cls.get_client()
+        result = client.table(settings.table_units).select("*").eq("id", unit_id).limit(1).execute()
+        return result.data[0] if result.data else None
     
     @classmethod
     def create_unit(cls, unit_data: Dict) -> Dict:
@@ -111,27 +127,29 @@ class DatabaseService:
         client = cls.get_client()
         query = client.table(settings.table_completed_projects).select("*")
         if user_id:
-            try:
-                result = query.eq("user_id", user_id).order("created_at", desc=True).execute()
-                return result.data or []
-            except Exception:
-                # 兼容旧表结构中尚未包含 user_id 字段的情况
-                pass
+            result = query.eq("user_id", user_id).order("created_at", desc=True).execute()
+            return result.data or []
         result = client.table(settings.table_completed_projects).select("*").order("created_at", desc=True).execute()
         return result.data or []
     
     @classmethod
-    def get_completed_project(cls, project_id: str) -> Optional[Dict]:
+    def get_completed_project(cls, project_id: str, user_id: Optional[str] = None) -> Optional[Dict]:
         """获取单个完成项目"""
         client = cls.get_client()
-        result = client.table(settings.table_completed_projects).select("*").eq("project_id", project_id).execute()
+        query = client.table(settings.table_completed_projects).select("*").eq("project_id", project_id)
+        if user_id:
+            query = query.eq("user_id", user_id)
+        result = query.execute()
         return result.data[0] if result.data else None
     
     @classmethod
-    def delete_completed_project(cls, project_id: str) -> bool:
+    def delete_completed_project(cls, project_id: str, user_id: Optional[str] = None) -> bool:
         """删除完成项目"""
         client = cls.get_client()
-        result = client.table(settings.table_completed_projects).delete().eq("project_id", project_id).execute()
+        query = client.table(settings.table_completed_projects).delete().eq("project_id", project_id)
+        if user_id:
+            query = query.eq("user_id", user_id)
+        result = query.execute()
         return len(result.data) > 0 if result.data else False
 
     # ==================== 应用用户与验证码 ====================
@@ -200,10 +218,17 @@ class DatabaseService:
     # ==================== 展品操作 =================###
     
     @classmethod
-    def get_exhibits(cls, project_id: Optional[str] = None, unit_id: Optional[str] = None) -> List[Dict]:
+    def get_exhibits(
+        cls,
+        project_id: Optional[str] = None,
+        unit_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[Dict]:
         """获取展品列表"""
         client = cls.get_client()
         query = client.table(settings.table_exhibits).select("*")
+        if user_id:
+            query = query.eq("user_id", user_id)
         if project_id:
             query = query.eq("project_id", project_id)
         if unit_id:
@@ -211,16 +236,37 @@ class DatabaseService:
         return query.execute().data or []
     
     @classmethod
-    def get_all_exhibits(cls) -> List[Dict]:
-        """获取全局展品知识库（不区分项目）"""
+    def get_all_exhibits(cls, user_id: Optional[str] = None) -> List[Dict]:
+        """获取展品知识库"""
         client = cls.get_client()
-        return client.table(settings.table_exhibits).select("*").order("created_at", desc=True).execute().data or []
+        query = client.table(settings.table_exhibits).select("*")
+        if user_id:
+            query = query.eq("user_id", user_id)
+        return query.order("created_at", desc=True).execute().data or []
     
     @classmethod
-    def search_exhibits(cls, keyword: str) -> List[Dict]:
+    def search_exhibits(cls, keyword: str, user_id: Optional[str] = None) -> List[Dict]:
         """搜索展品（按名称或时代）"""
         client = cls.get_client()
-        return client.table(settings.table_exhibits).select("*").or_(f"name.ilike.%{keyword}%,era.ilike.%{keyword}%").execute().data or []
+        query = client.table(settings.table_exhibits).select("*")
+        if user_id:
+            query = query.eq("user_id", user_id)
+        return (
+            query.or_(
+                f"name.ilike.%{keyword}%,time.ilike.%{keyword}%,place.ilike.%{keyword}%,"
+                f"material.ilike.%{keyword}%,introduction.ilike.%{keyword}%,other.ilike.%{keyword}%"
+            ).execute().data or []
+        )
+
+    @classmethod
+    def get_exhibit(cls, exhibit_id: str, user_id: Optional[str] = None) -> Optional[Dict]:
+        """获取单个展品"""
+        client = cls.get_client()
+        query = client.table(settings.table_exhibits).select("*").eq("id", exhibit_id)
+        if user_id:
+            query = query.eq("user_id", user_id)
+        result = query.limit(1).execute()
+        return result.data[0] if result.data else None
     
     @classmethod
     def create_exhibit(cls, exhibit_data: Dict) -> Dict:
@@ -230,24 +276,33 @@ class DatabaseService:
         return result.data[0] if result.data else None
     
     @classmethod
-    def update_exhibit(cls, exhibit_id: str, exhibit_data: Dict) -> Dict:
+    def update_exhibit(cls, exhibit_id: str, exhibit_data: Dict, user_id: Optional[str] = None) -> Dict:
         """更新展品"""
         client = cls.get_client()
-        result = client.table(settings.table_exhibits).update(exhibit_data).eq("id", exhibit_id).execute()
+        query = client.table(settings.table_exhibits).update(exhibit_data).eq("id", exhibit_id)
+        if user_id:
+            query = query.eq("user_id", user_id)
+        result = query.execute()
         return result.data[0] if result.data else None
     
     @classmethod
-    def delete_exhibit(cls, exhibit_id: str) -> bool:
+    def delete_exhibit(cls, exhibit_id: str, user_id: Optional[str] = None) -> bool:
         """删除展品"""
         client = cls.get_client()
-        result = client.table(settings.table_exhibits).delete().eq("id", exhibit_id).execute()
+        query = client.table(settings.table_exhibits).delete().eq("id", exhibit_id)
+        if user_id:
+            query = query.eq("user_id", user_id)
+        result = query.execute()
         return len(result.data) > 0 if result.data else False
     
     @classmethod
-    def delete_all_exhibits(cls) -> bool:
+    def delete_all_exhibits(cls, user_id: Optional[str] = None) -> bool:
         """清空所有展品"""
         client = cls.get_client()
-        client.table(settings.table_exhibits).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+        query = client.table(settings.table_exhibits).delete().neq("id", "00000000-0000-0000-0000-000000000000")
+        if user_id:
+            query = query.eq("user_id", user_id)
+        query.execute()
         return True
     
     # ==================== 文本段落操作 ====================
@@ -258,6 +313,13 @@ class DatabaseService:
         client = cls.get_client()
         result = client.table(settings.table_text_sections).select("*").eq("project_id", project_id).order("order").execute()
         return result.data or []
+
+    @classmethod
+    def get_text_section(cls, section_id: str) -> Optional[Dict]:
+        """获取单个文本段落"""
+        client = cls.get_client()
+        result = client.table(settings.table_text_sections).select("*").eq("id", section_id).limit(1).execute()
+        return result.data[0] if result.data else None
     
     @classmethod
     def create_text_section(cls, section_data: Dict) -> Dict:

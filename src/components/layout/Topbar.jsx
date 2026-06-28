@@ -9,8 +9,11 @@ export const Topbar = ({
   setShowExport,
   goToStep,
   authUser,
-  guestUserId,
   authInitialized,
+  authPanelOpen,
+  setAuthPanelOpen,
+  authPromptMessage,
+  setAuthPromptMessage,
   sendEmailCode,
   verifyEmailCode,
   logout,
@@ -20,7 +23,7 @@ export const Topbar = ({
   const C = theme;
   const isOnStepPage = currentPage.startsWith('step');
   const canExport = currentStep >= 5;
-  const [panelOpen, setPanelOpen] = useState(false);
+  const topbarTitle = isOnStepPage ? (currentProject?.title || '智能策展助手') : '';
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [countdown, setCountdown] = useState(0);
@@ -31,15 +34,15 @@ export const Topbar = ({
   const avatarText = authUser?.display_name?.slice(0, 1)?.toUpperCase() || authUser?.email?.slice(0, 1)?.toUpperCase() || '访';
 
   useEffect(() => {
-    if (!panelOpen) return undefined;
+    if (!authPanelOpen) return undefined;
     const handleMouseDown = (event) => {
       if (panelRef.current && !panelRef.current.contains(event.target)) {
-        setPanelOpen(false);
+        setAuthPanelOpen(false);
       }
     };
     window.addEventListener('mousedown', handleMouseDown);
     return () => window.removeEventListener('mousedown', handleMouseDown);
-  }, [panelOpen]);
+  }, [authPanelOpen, setAuthPanelOpen]);
 
   useEffect(() => {
     if (countdown <= 0) return undefined;
@@ -80,6 +83,7 @@ export const Topbar = ({
       if (result?.success) {
         setCodeSentEmail(result.email || email);
         setCountdown(60);
+        setAuthPromptMessage('');
       }
     } finally {
       setIsSendingCode(false);
@@ -99,7 +103,7 @@ export const Topbar = ({
     try {
       const result = await verifyEmailCode(email, code);
       if (result?.success) {
-        setPanelOpen(false);
+        setAuthPanelOpen(false);
         resetForm();
       }
     } finally {
@@ -109,13 +113,15 @@ export const Topbar = ({
 
   return (
     <header style={{
-      position: 'fixed', top: 0, left: 220, right: 0, height: 48,
-      background: '#fff', borderBottom: `1px solid ${C.border}`,
+      position: 'fixed', top: 0, left: 232, right: 0, height: 52,
+      background: C.bgElevated || C.bgSecondary, borderBottom: `1px solid ${C.border}`,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      zIndex: 99, padding: '0 24px',
+      zIndex: 99, padding: '0 28px',
+      backdropFilter: 'blur(14px)',
+      boxShadow: '0 4px 20px rgba(16, 24, 40, 0.04)',
     }}>
-      <span style={{ fontSize: 12, color: C.textSecondary }}>
-        {currentProject?.title || (isOnStepPage ? '智能策展助手' : '')}
+      <span style={{ fontSize: 12, color: C.textSecondary, letterSpacing: '0.02em' }}>
+        {topbarTitle}
       </span>
 
       {isOnStepPage && (
@@ -140,6 +146,7 @@ export const Topbar = ({
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 11, color: '#fff', fontWeight: 700,
                     transition: 'background 0.2s',
+                    boxShadow: isActive ? `0 6px 14px ${C.accentPrimary}26` : 'none',
                   }}>{isDone ? '✓' : n}</div>
                   <span style={{
                     fontSize: 10, whiteSpace: 'nowrap',
@@ -161,7 +168,7 @@ export const Topbar = ({
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        {isOnStepPage && <span style={{ fontSize: 12, color: C.success }}>✓ 已自动保存</span>}
+        {isOnStepPage && <span style={{ fontSize: 12, color: C.success, fontWeight: 600 }}>✓ 已自动保存</span>}
         {isOnStepPage && (
           <Btn
             small
@@ -173,12 +180,14 @@ export const Topbar = ({
         )}
         <div ref={panelRef} style={{ position: 'relative' }}>
           <button
-            onClick={() => setPanelOpen(prev => !prev)}
+            onClick={() => setAuthPanelOpen(prev => !prev)}
             style={{
-              width: 30,
-              height: 30,
+              width: 32,
+              height: 32,
               borderRadius: '50%',
-              background: isLoggedIn ? C.accentPrimary : C.accentSecondary,
+              background: isLoggedIn
+                ? `linear-gradient(135deg, ${C.accentPrimary} 0%, ${C.sidebarAccent || C.accentPrimary} 100%)`
+                : `linear-gradient(135deg, ${C.accentSecondary} 0%, ${C.accentPrimary} 100%)`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -187,23 +196,24 @@ export const Topbar = ({
               fontSize: 13,
               border: 'none',
               cursor: 'pointer',
+              boxShadow: C.shadowSm,
             }}
             title={isLoggedIn ? `当前账号：${authUser.email || authUser.id}` : '点击登录'}
           >
             {avatarText}
           </button>
 
-          {panelOpen && (
+          {authPanelOpen && (
             <div style={{
               position: 'absolute',
               top: 40,
               right: 0,
               width: 320,
-              background: '#fff',
+              background: C.bgElevated || '#fff',
               border: `1px solid ${C.border}`,
-              borderRadius: 12,
-              boxShadow: '0 10px 28px rgba(0,0,0,0.12)',
-              padding: 16,
+              borderRadius: 18,
+              boxShadow: C.shadowLg,
+              padding: 18,
               zIndex: 130,
             }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary, marginBottom: 6 }}>
@@ -213,9 +223,24 @@ export const Topbar = ({
                 {isLoggedIn
                   ? `当前已登录：${authUser.email || authUser.display_name || '未命名账号'}`
                   : authInitialized
-                    ? `当前以访客身份使用，访客 ID：${guestUserId.slice(-8)}`
+                    ? '当前为访客预览模式：可浏览界面，但不会加载项目和展品数据。'
                     : '正在恢复登录状态...'}
               </div>
+
+              {!isLoggedIn && authPromptMessage && (
+                <div style={{
+                  fontSize: 12,
+                  color: C.accentPrimary,
+                  background: `${C.accentPrimary}10`,
+                  border: `1px solid ${C.accentPrimary}22`,
+                  borderRadius: 10,
+                  padding: '10px 12px',
+                  lineHeight: 1.6,
+                  marginBottom: 14,
+                }}>
+                  {authPromptMessage}
+                </div>
+              )}
 
               {isLoggedIn ? (
                 <>
@@ -226,7 +251,7 @@ export const Topbar = ({
                   </div>
                   <Btn small variant="ghost" onClick={() => {
                     logout();
-                    setPanelOpen(false);
+                    setAuthPanelOpen(false);
                   }} style={{ width: '100%' }}>
                     退出登录
                   </Btn>
@@ -301,6 +326,9 @@ export const Topbar = ({
                     lineHeight: 1.6,
                   }}>
                     首次使用邮箱登录时，系统会自动创建账号并同步用户资料。
+                  </div>
+                  <div style={{ fontSize: 11, color: C.textSecondary, lineHeight: 1.6 }}>
+                    登录后只能查看和编辑你自己的策展项目与展品库内容。
                   </div>
                 </div>
               )}

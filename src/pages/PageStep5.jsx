@@ -1,7 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, Btn, Divider } from '../components/ui';
+import {
+  getExhibitMaterial,
+  getExhibitName,
+  getExhibitOther,
+  getExhibitPlace,
+  getExhibitTime,
+} from '../utils/exhibitFields';
 
-export const PageStep5 = ({ 
+export const PageStep5 = ({
   setPage,
   goPrevStep,
   warningVisible,
@@ -22,6 +29,13 @@ export const PageStep5 = ({
   const [activeSection, setActiveSection] = useState('preface');
   const [selectedFormat, setSelectedFormat] = useState('Markdown');
   const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const infoCardStyle = {
+    padding: "14px 16px",
+    borderRadius: 16,
+    border: `1px solid ${C.border}`,
+    background: C.bgElevated || C.bgSecondary,
+    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.04)",
+  };
 
   useEffect(() => {
     if (currentProject) {
@@ -97,7 +111,7 @@ export const PageStep5 = ({
       .map((key) => textSections?.find((section) => String(section.key) === key))
       .find(Boolean) || null;
   };
-  
+
   const outlineToc = [
     { id: 'preface', title: '序言', page: 1 },
     ...unitsData.map((u, i) => ({ id: String(i), title: u.tag ? `${u.tag}：${u.title}` : u.title, page: i + 2 })),
@@ -195,7 +209,7 @@ export const PageStep5 = ({
 
     const sections = [
       { id: 'preface', ...getSectionContent('preface') },
-      ...unitsData.map((u, i) => ({ id: String(i), ...getSectionContent(String(i)) })),
+      ...unitsData.map((_, i) => ({ id: String(i), ...getSectionContent(String(i)) })),
       { id: 'epilogue', ...getSectionContent('epilogue') },
     ];
 
@@ -206,10 +220,10 @@ export const PageStep5 = ({
 
       if (section.exhibits && section.exhibits.length > 0) {
         fullContent += '### 展品列表\n\n';
-        fullContent += '| ID | 名称 | 年代 | 材质 | 尺寸 | 推荐权重 | 来源 |\n';
-        fullContent += '|---|---|---|---|---|---|---|\n';
+        fullContent += '| ID | 名称 | 时间 | 地点 | 材质 | 其他 | 推荐权重 | 来源 |\n';
+        fullContent += '|---|---|---|---|---|---|---|---|\n';
         section.exhibits.forEach(ex => {
-          fullContent += `| ${ex.id || '-'} | ${ex.name || '-'} | ${ex.era || '-'} | ${ex.mat || ex.material || '-'} | ${ex.sz || ex.size || '-'} | ${ex.stars || '-'} | ${ex.ctx || ex.source || '-'} |\n`;
+          fullContent += `| ${ex.id || '-'} | ${getExhibitName(ex) || '-'} | ${getExhibitTime(ex) || '-'} | ${getExhibitPlace(ex) || '-'} | ${getExhibitMaterial(ex) || '-'} | ${getExhibitOther(ex) || '-'} | ${ex.stars || '-'} | ${ex.ctx || ex.source || '-'} |\n`;
         });
         fullContent += '\n';
       }
@@ -230,8 +244,8 @@ export const PageStep5 = ({
 
   const convertMarkdownToHtml = (md) => {
     let html = md;
-    
-    html = html.replace(/\|(.+)\|\n\|[-|]+\|\n((?:\|.+\|\n?)+)/g, (match, header, body) => {
+
+    html = html.replace(/\|(.+)\|\n\|[-|]+\|\n((?:\|.+\|\n?)+)/g, (_match, header, body) => {
       const headers = header.split('|').filter(h => h.trim()).map(h => `<th>${h.trim()}</th>`).join('');
       const rows = body.trim().split('\n').map(row => {
         const cells = row.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('');
@@ -239,7 +253,7 @@ export const PageStep5 = ({
       }).join('');
       return `<table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table>`;
     });
-    
+
     html = html
       .replace(/^### (.+)$/gm, '<h3>$1</h3>')
       .replace(/^## (.+)$/gm, '<h2>$1</h2>')
@@ -249,7 +263,7 @@ export const PageStep5 = ({
       .replace(/---/g, '<hr>')
       .replace(/\n(?=<[^h])/g, '<br>')
       .replace(/\n(?=<h)/g, '');
-    
+
     return html;
   };
 
@@ -262,7 +276,8 @@ export const PageStep5 = ({
         <head>
           <title>${projectTitle}</title>
           <style>
-            body { font-family: 'Noto Serif SC', serif; padding: 40px; max-width: 800px; margin: 0 auto; line-height: 1.8; }
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&display=swap');
+            body { font-family: 'Source Han Serif SC', 'Noto Serif SC', 'Songti SC', 'STSong', serif; padding: 40px; max-width: 800px; margin: 0 auto; line-height: 1.8; }
             h1 { font-size: 24px; text-align: center; }
             h2 { font-size: 18px; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-top: 24px; }
             h3 { font-size: 14px; margin-top: 16px; }
@@ -314,34 +329,81 @@ export const PageStep5 = ({
 
   return (
     <main style={{ padding: "28px 36px" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, color: C.textPrimary, fontFamily: "'Noto Serif SC', serif" }}>
-        Step 5：展览大纲生成
-      </h1>
-      <p style={{ color: C.textSecondary, fontSize: 14, margin: "6px 0 16px" }}>
-        请完整审核后导出
-      </p>
+      <div style={{
+        padding: "24px 28px",
+        borderRadius: 24,
+        border: `1px solid ${C.border}`,
+        background: `linear-gradient(180deg, ${C.bgElevated || C.bgSecondary} 0%, ${C.bgSecondary} 100%)`,
+        boxShadow: "0 18px 40px rgba(15, 23, 42, 0.05)",
+        marginBottom: 24,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ maxWidth: 760 }}>
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 12px",
+              borderRadius: 999,
+              background: `${C.accentPrimary}12`,
+              border: `1px solid ${C.accentPrimary}18`,
+              color: C.accentPrimary,
+              fontSize: 12,
+              fontWeight: 700,
+              marginBottom: 14,
+            }}>
+              Step 5 / 5
+            </div>
+            <h1 style={{ fontSize: 26, fontWeight: 700, color: C.textPrimary, fontFamily: "var(--font-serif)", margin: 0 }}>
+              展览大纲生成
+            </h1>
+            <p style={{ color: C.textSecondary, fontSize: 14, margin: "10px 0 0", lineHeight: 1.8, maxWidth: 720 }}>
+              这里汇总了序言、单元结构、文稿与展品清单。请在导出前完整审核，并选择合适的交付格式。
+            </p>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginTop: 20 }}>
+          <div style={infoCardStyle}>
+            <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>展览题目</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary, lineHeight: 1.6 }}>{projectTitle}</div>
+          </div>
+          <div style={infoCardStyle}>
+            <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>大纲章节</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{outlineToc.length} 段</div>
+          </div>
+          <div style={infoCardStyle}>
+            <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>正文单元</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{unitsData.length} 个</div>
+          </div>
+          <div style={infoCardStyle}>
+            <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6 }}>当前导出格式</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>{selectedFormat}</div>
+          </div>
+        </div>
+      </div>
 
       {warningVisible && (
         <div style={{
           background: "#FFFBEB", border: `1px solid ${C.warning}`, borderLeft: `4px solid ${C.warning}`,
-          borderRadius: 6, padding: "12px 16px", marginBottom: 20, fontSize: 13, color: C.warning,
+          borderRadius: 12, padding: "14px 18px", marginBottom: 20, fontSize: 13, color: C.warning,
         }}>
           ⚠️ 这是最终导出前的人工审核环节。AI 生成内容已标注来源，建议您完整浏览后再导出。导出前请确认学术内容的准确性。
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 24 }}>
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
         <div style={{ width: 260, flexShrink: 0 }}>
-          <Card style={{ padding: "12px 0" }}>
+          <Card style={{ padding: "12px 0", borderRadius: 20, boxShadow: "0 18px 40px rgba(15, 23, 42, 0.05)" }}>
             <div style={{ padding: "0 16px 8px", fontWeight: 700, fontSize: 13, color: C.textSecondary }}>大纲目录</div>
             <Divider />
             <div style={{ padding: "8px 16px 4px", fontWeight: 700, fontSize: 12, color: C.textSecondary }}>{projectTitle}</div>
             {outlineToc.map((item) => (
-              <div 
+              <div
                 key={item.id}
                 onClick={() => setActiveSection(item.id)}
                 style={{
-                  padding: "8px 16px", fontSize: 13, cursor: "pointer",
+                  padding: "10px 16px", fontSize: 13, cursor: "pointer",
                   color: activeSection === item.id ? C.accentPrimary : C.textSecondary,
                   fontWeight: activeSection === item.id ? 600 : 400,
                   background: activeSection === item.id ? `${C.aiGenerated}88` : "transparent",
@@ -352,80 +414,92 @@ export const PageStep5 = ({
               </div>
             ))}
             <Divider />
-            <div style={{ padding: "8px 16px" }}>
-              <Btn small onClick={() => setShowExport(true)}>⬇ 导出 .md</Btn>
+            <div style={{ padding: "10px 16px 14px" }}>
+              <Btn small onClick={() => setShowExport(true)} style={{ width: "100%" }}>⬇ 导出大纲</Btn>
             </div>
           </Card>
         </div>
 
         <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", gap: 12, fontSize: 12, marginBottom: 16, justifyContent: "flex-end" }}>
-            <span style={{ background: C.aiGenerated, padding: "3px 10px", borderRadius: 4 }}>蓝色背景为AI生成原文</span>
-            <span style={{ background: C.humanEdited, padding: "3px 10px", borderRadius: 4 }}>黄色背景为您已修改</span>
+          <div style={{ display: "flex", gap: 10, fontSize: 12, marginBottom: 16, justifyContent: "flex-end", flexWrap: "wrap" }}>
+            <span style={{ background: C.aiGenerated, padding: "5px 10px", borderRadius: 999 }}>蓝色背景为 AI 生成原文</span>
+            <span style={{ background: C.humanEdited, padding: "5px 10px", borderRadius: 999 }}>黄色背景为您已修改</span>
           </div>
 
-          <h1 style={{ fontSize: 26, fontWeight: 700, color: C.textPrimary, fontFamily: "'Noto Serif SC', serif", marginBottom: 16 }}>
-            {projectTitle}
-          </h1>
-          <Divider />
+          <div style={{
+            borderRadius: 24,
+            border: `1px solid ${C.border}`,
+            background: C.bgElevated || C.bgSecondary,
+            boxShadow: "0 18px 40px rgba(15, 23, 42, 0.05)",
+            padding: "22px 24px",
+          }}>
+            <h1 style={{ fontSize: 28, fontWeight: 700, color: C.textPrimary, fontFamily: "var(--font-serif)", margin: "0 0 16px" }}>
+              {projectTitle}
+            </h1>
+            <Divider />
 
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, marginTop: 16, marginBottom: 12 }}>
-            {currentSection.title}
-          </h2>
-          
-          <div 
-            dangerouslySetInnerHTML={{ __html: currentSection.content }}
-            style={{ 
-              background: currentSection.isAI ? C.aiGenerated : C.humanEdited, 
-              borderRadius: 6, 
-              padding: "14px 16px", 
-              fontSize: 14, 
-              lineHeight: 1.8, 
-              color: C.textPrimary, 
-              marginBottom: 20 
-            }}
-          />
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, marginTop: 18, marginBottom: 12, fontFamily: "var(--font-serif)" }}>
+              {currentSection.title}
+            </h2>
 
-          {(() => {
-            const unitExhibits = resolveUnitExhibits(activeSection);
-            
-            return unitExhibits.length > 0 && (
-            <>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary, marginBottom: 8 }}>展品列表</h3>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                  <thead>
-                    <tr style={{ background: C.bgPrimary }}>
-                      {["名称", "年代", "材质", "尺寸"].map(h => (
-                        <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 700, color: C.textSecondary, borderBottom: `1px solid ${C.border}` }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {unitExhibits.map((ex, i) => (
-                      <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : C.bgPrimary }}>
-                        <td style={{ padding: "8px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 600 }}>{ex.name || '-'}</td>
-                        <td style={{ padding: "8px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{ex.era || '-'}</td>
-                        <td style={{ padding: "8px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{ex.mat || ex.material || '-'}</td>
-                        <td style={{ padding: "8px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{ex.sz || ex.size || '-'}</td>
+            <div
+              dangerouslySetInnerHTML={{ __html: currentSection.content }}
+              style={{
+                background: currentSection.isAI ? C.aiGenerated : C.humanEdited,
+                borderRadius: 16,
+                padding: "16px 18px",
+                fontSize: 14,
+                lineHeight: 1.85,
+                fontFamily: "var(--font-serif)",
+                color: C.textPrimary,
+                marginBottom: 20,
+                border: `1px solid ${currentSection.isAI ? `${C.accentPrimary}22` : `${C.accentSecondary}33`}`,
+              }}
+            />
+
+            {(() => {
+              const unitExhibits = resolveUnitExhibits(activeSection);
+
+              return unitExhibits.length > 0 && (
+              <>
+                <h3 style={{ fontSize: 15, fontWeight: 700, color: C.textPrimary, marginBottom: 10 }}>展品列表</h3>
+                <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 16, background: C.bgPrimary }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: C.bgElevated || C.bgSecondary }}>
+                        {["名称", "时间", "地点", "材质", "其他"].map(h => (
+                          <th key={h} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 700, color: C.textSecondary, borderBottom: `1px solid ${C.border}` }}>{h}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          );
-          })()}
+                    </thead>
+                    <tbody>
+                      {unitExhibits.map((ex, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? "#fff" : C.bgPrimary }}>
+                          <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary, fontWeight: 600 }}>{getExhibitName(ex) || '-'}</td>
+                          <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{getExhibitTime(ex) || '-'}</td>
+                          <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{getExhibitPlace(ex) || '-'}</td>
+                          <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{getExhibitMaterial(ex) || '-'}</td>
+                          <td style={{ padding: "10px 12px", borderBottom: `1px solid ${C.border}`, color: C.textPrimary }}>{getExhibitOther(ex) || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            );
+            })()}
+          </div>
         </div>
       </div>
 
       {showExport && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,.4)",
+          position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.28)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200,
+          backdropFilter: "blur(4px)", padding: 16,
         }}>
-          <div style={{ background: "#fff", borderRadius: 10, padding: 28, width: 380, boxShadow: "0 8px 32px rgba(0,0,0,.2)" }}>
-            <h3 style={{ fontWeight: 700, fontSize: 16, marginBottom: 16, color: C.textPrimary }}>导出策展大纲</h3>
+          <div style={{ background: C.bgPrimary, borderRadius: 22, padding: 28, width: 400, maxWidth: "100%", boxShadow: "0 24px 60px rgba(15, 23, 42, 0.14)", border: `1px solid ${C.border}` }}>
+            <h3 style={{ fontWeight: 700, fontSize: 18, margin: 0, marginBottom: 16, color: C.textPrimary, fontFamily: "var(--font-serif)" }}>导出策展大纲</h3>
             <div style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: C.textSecondary, marginBottom: 8 }}>导出格式</div>
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
@@ -448,11 +522,12 @@ export const PageStep5 = ({
 
       {showCompleteModal && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,.4)",
+          position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.28)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200,
+          backdropFilter: "blur(4px)", padding: 16,
         }}>
-          <div style={{ background: "#fff", borderRadius: 10, padding: 28, width: 400, boxShadow: "0 8px 32px rgba(0,0,0,.2)" }}>
-            <h3 style={{ fontWeight: 700, fontSize: 16, marginBottom: 12, color: C.textPrimary }}>确认完成</h3>
+          <div style={{ background: C.bgPrimary, borderRadius: 22, padding: 28, width: 420, maxWidth: "100%", boxShadow: "0 24px 60px rgba(15, 23, 42, 0.14)", border: `1px solid ${C.border}` }}>
+            <h3 style={{ fontWeight: 700, fontSize: 18, margin: 0, marginBottom: 12, color: C.textPrimary, fontFamily: "var(--font-serif)" }}>确认完成</h3>
             <p style={{ fontSize: 14, color: C.textSecondary, marginBottom: 20, lineHeight: 1.6 }}>
               确定要完成此策展项目吗？项目将移至已完成列表，您可以随时在"已完成项目"中查看。
             </p>
@@ -464,10 +539,31 @@ export const PageStep5 = ({
         </div>
       )}
 
-      <Divider style={{ margin: "24px 0" }} />
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <Btn variant="ghost" onClick={goPrevStep}>← 返回 Step4</Btn>
-        <Btn variant="success" onClick={handleComplete}>✓ 完成</Btn>
+      <div style={{
+        marginTop: 24,
+        padding: "18px 20px",
+        borderRadius: 20,
+        border: `1px solid ${C.border}`,
+        background: C.bgElevated || C.bgSecondary,
+        boxShadow: "0 12px 28px rgba(15, 23, 42, 0.04)",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: 16,
+        flexWrap: "wrap",
+      }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary }}>
+            审核无误后即可导出或完成项目
+          </div>
+          <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 4 }}>
+            你可以先导出交付稿，也可以直接完成项目并归档到已完成列表。
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <Btn variant="ghost" onClick={goPrevStep}>← 返回 Step4</Btn>
+          <Btn variant="success" onClick={handleComplete}>✓ 完成</Btn>
+        </div>
       </div>
     </main>
   );

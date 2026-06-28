@@ -5,7 +5,7 @@ import { api } from "./api/client";
 import { Sidebar, Topbar } from "./components/layout";
 import { ToastProvider } from "./components/ui/Toast";
 import { PageP0, PageP1, PageExhibits, PageSettings, PageHelp, PageStep1, PageStep2, PageStep3, PageStep4, PageStep5 } from "./pages";
-import { getTheme } from "./constants/theme";
+import { getTheme, FONT_UI, FONT_SERIF } from "./constants/theme";
 import { ThemeProvider } from "./hooks/useTheme";
 
 const PAGE_COMPONENTS = {
@@ -23,7 +23,7 @@ const PAGE_COMPONENTS = {
 
 function CurationApp() {
   const store = useCurationStore();
-  const { currentPage, toast, setProjects, setCompletedProjects, darkMode, activeUserId, authInitialized } = store;
+  const { currentPage, toast, setProjects, setCompletedProjects, darkMode, activeUserId, authInitialized, isLoggedIn } = store;
   const PageComponent = PAGE_COMPONENTS[currentPage] || PageP0;
   const theme = getTheme(darkMode);
 
@@ -63,7 +63,7 @@ function CurationApp() {
             theme: p.theme,
             narrative: p.narrative,
             narrativeOptions: p.narrative_options,
-            selectedNarrative: p.selected_narrative || 0,
+            selectedNarrative: p.selected_narrative ?? null,
             llmParams: p.llm_params,
             exhibitionTitle: p.exhibition_title,
             uploadedExhibits: p.uploaded_exhibits,
@@ -82,7 +82,7 @@ function CurationApp() {
             time: p.time || new Date(p.created_at).toLocaleDateString(),
             narrative: p.narrative,
             narrativeOptions: p.narrative_options || [],
-            selectedNarrative: p.selected_narrative || 0,
+            selectedNarrative: p.selected_narrative ?? null,
             llmParams: p.llm_params,
             exhibitionTitle: p.exhibition_title,
             uploadedExhibits: p.uploaded_exhibits || [],
@@ -101,9 +101,14 @@ function CurationApp() {
     };
 
     if (PAGES_THAT_NEED_PROJECTS.includes(currentPage)) {
-      loadProjects();
+      if (isLoggedIn && activeUserId) {
+        loadProjects();
+      } else {
+        setProjects([]);
+        setCompletedProjects([]);
+      }
     }
-  }, [currentPage, setProjects, setCompletedProjects, activeUserId, authInitialized]);
+  }, [currentPage, setProjects, setCompletedProjects, activeUserId, authInitialized, isLoggedIn]);
 
   return (
     <ThemeProvider theme={theme}>
@@ -113,14 +118,36 @@ function CurationApp() {
             margin: 0, 
             padding: 0, 
             background: theme.bgPrimary,
+            backgroundImage: `radial-gradient(circle at top right, ${theme.accentSecondary}10 0%, transparent 28%), radial-gradient(circle at top left, ${theme.accentPrimary}0D 0%, transparent 26%)`,
             minHeight: '100vh',
             color: theme.textPrimary,
             transition: 'background 0.3s, color 0.3s',
+            fontFamily: "var(--font-ui)",
           }}
         >
+          <style>{`
+            :root {
+              --font-ui: ${FONT_UI};
+              --font-serif: ${FONT_SERIF};
+            }
+            html, body, #root {
+              margin: 0;
+              min-height: 100%;
+              background: ${theme.bgPrimary};
+            }
+            * {
+              box-sizing: border-box;
+            }
+            button, input, textarea, select {
+              font: inherit;
+            }
+            ::selection {
+              background: ${theme.accentPrimary}22;
+            }
+          `}</style>
           <Sidebar {...store} theme={theme} />
           <Topbar {...store} theme={theme} />
-          <div style={{ marginLeft: 220, paddingTop: 48 }}>
+          <div style={{ marginLeft: 232, paddingTop: 52 }}>
             <PageComponent {...store} theme={theme} />
           </div>
         </div>

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { STEPS } from '../constants/theme';
-import { Card, Btn, Divider } from '../components/ui';
+import { Card, Btn } from '../components/ui';
 import { api } from '../api/client';
 
 const RHYTHM_PRESET_LABELS = {
@@ -29,6 +29,7 @@ export const PageP0 = ({
   refreshProjects,
   setCurrentStep,
   setCurrentPage,
+  isLoggedIn,
   theme,
 }) => {
   const C = theme;
@@ -217,7 +218,7 @@ export const PageP0 = ({
           step: fullProject.step || project.step,
           narrative: fullProject.narrative,
           narrativeOptions: fullProject.narrative_options,
-          selectedNarrative: fullProject.selected_narrative,
+          selectedNarrative: fullProject.selected_narrative ?? null,
           llmParams: fullProject.llm_params,
           exhibitionTitle: fullProject.exhibition_title,
           uploadedExhibits: fullProject.uploaded_exhibits,
@@ -234,7 +235,7 @@ export const PageP0 = ({
             step: 5,
             narrative: completedProject.narrative,
             narrativeOptions: completedProject.narrative_options,
-            selectedNarrative: completedProject.selected_narrative,
+            selectedNarrative: completedProject.selected_narrative ?? null,
             llmParams: completedProject.llm_params,
             exhibitionTitle: completedProject.exhibition_title,
             uploadedExhibits: completedProject.uploaded_exhibits,
@@ -246,16 +247,22 @@ export const PageP0 = ({
       }
       
       if (enrichedProject) {
-        if (enrichedProject.step === 0 || !enrichedProject.narrative || !enrichedProject.narrative.title) {
-          try {
-            await api.projects.delete(project.id);
-            setProjects(projects.filter(p => p.id !== project.id));
-            showToast('方向未选定，请重新创建项目', 'info');
-          } catch (e) {
-            showToast('删除失败', 'error');
-          }
+        const hasConfirmedNarrative =
+          enrichedProject.selectedNarrative !== null &&
+          enrichedProject.selectedNarrative !== undefined &&
+          enrichedProject.narrative?.title;
+
+        if (enrichedProject.step <= 1 || !hasConfirmedNarrative) {
+          enrichedProject.step = 1;
+          enrichedProject.selectedNarrative = null;
+          enrichedProject.selected_narrative = null;
+          enrichedProject.narrative = null;
+          openProject(enrichedProject);
+          showToast('请先选择一个叙事方向', 'info');
+          setLoadingProject(null);
           return;
         }
+
         const backStep = Math.max(1, enrichedProject.step - 1);
         enrichedProject.step = backStep;
         openProject(enrichedProject);
@@ -281,7 +288,7 @@ export const PageP0 = ({
           step: 5,
           narrative: completedProject.narrative,
           narrativeOptions: completedProject.narrative_options,
-          selectedNarrative: completedProject.selected_narrative,
+          selectedNarrative: completedProject.selected_narrative ?? null,
           llmParams: completedProject.llm_params,
           exhibitionTitle: completedProject.exhibition_title,
           uploadedExhibits: completedProject.uploaded_exhibits,
@@ -321,7 +328,7 @@ export const PageP0 = ({
           step: fullProject.step || project.step,
           narrative: fullProject.narrative,
           narrativeOptions: fullProject.narrative_options,
-          selectedNarrative: fullProject.selected_narrative,
+          selectedNarrative: fullProject.selected_narrative ?? null,
           llmParams: fullProject.llm_params,
           exhibitionTitle: fullProject.exhibition_title,
           uploadedExhibits: fullProject.uploaded_exhibits,
@@ -338,7 +345,7 @@ export const PageP0 = ({
             step: 5,
             narrative: completedProject.narrative,
             narrativeOptions: completedProject.narrative_options,
-            selectedNarrative: completedProject.selected_narrative,
+            selectedNarrative: completedProject.selected_narrative ?? null,
             llmParams: completedProject.llm_params,
             exhibitionTitle: completedProject.exhibition_title,
             uploadedExhibits: completedProject.uploaded_exhibits,
@@ -384,7 +391,7 @@ export const PageP0 = ({
           step: fullProject.step || project.step,
           narrative: fullProject.narrative,
           narrativeOptions: fullProject.narrative_options,
-          selectedNarrative: fullProject.selected_narrative,
+          selectedNarrative: fullProject.selected_narrative ?? null,
           llmParams: fullProject.llm_params,
           exhibitionTitle: fullProject.exhibition_title,
           uploadedExhibits: fullProject.uploaded_exhibits,
@@ -406,7 +413,7 @@ export const PageP0 = ({
             step: 5,
             narrative: completedProject.narrative,
             narrativeOptions: completedProject.narrative_options,
-            selectedNarrative: completedProject.selected_narrative,
+            selectedNarrative: completedProject.selected_narrative ?? null,
             llmParams: completedProject.llm_params,
             exhibitionTitle: completedProject.exhibition_title,
             uploadedExhibits: completedProject.uploaded_exhibits,
@@ -474,7 +481,11 @@ export const PageP0 = ({
   const renderStepContent = (project, step) => {
     switch (step) {
       case 1:
-        const selectedOption = project.narrativeOptions?.[project.selectedNarrative];
+        const hasSelectedNarrative =
+          project.selectedNarrative !== null &&
+          project.selectedNarrative !== undefined &&
+          project.narrative?.title;
+        const selectedOption = hasSelectedNarrative ? project.narrativeOptions?.[project.selectedNarrative] : null;
         return (
           <div>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>叙事方向</div>
@@ -498,7 +509,7 @@ export const PageP0 = ({
             )}
             {project.narrativeOptions && project.narrativeOptions.length > 0 && (
               <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 4 }}>
-                方案数量: {project.narrativeOptions.length}（已选择: {project.selectedNarrative + 1}）
+                方案数量: {project.narrativeOptions.length}（{hasSelectedNarrative ? `已选择: ${project.selectedNarrative + 1}` : '尚未选择'}）
               </div>
             )}
           </div>
@@ -587,89 +598,276 @@ export const PageP0 = ({
   };
 
   return (
-    <main style={{ padding: "28px 36px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: C.textPrimary, fontFamily: "'Noto Serif SC', serif" }}>
-          我的项目
-        </h1>
-        <Btn onClick={() => createNewProject()}>+ 新建策展项目</Btn>
-      </div>
+    <main style={{ padding: "32px 36px 40px", maxWidth: 1280 }}>
+      <section style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "flex-end",
+        gap: 20,
+        padding: "24px 28px",
+        borderRadius: 22,
+        border: `1px solid ${C.border}`,
+        background: `linear-gradient(135deg, ${C.bgElevated || C.bgSecondary} 0%, ${C.bgMuted || C.bgPrimary} 100%)`,
+        boxShadow: C.shadowSm,
+        marginBottom: 28,
+      }}>
+        <div>
+          <div style={{ fontSize: 11, color: C.accentSecondary, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 8 }}>
+            CURATION WORKSPACE
+          </div>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: C.textPrimary, margin: 0, fontFamily: "var(--font-serif)" }}>
+            我的项目
+          </h1>
+          <div style={{ color: C.textSecondary, fontSize: 14, marginTop: 10, lineHeight: 1.7, maxWidth: 620 }}>
+            在这里查看进行中的策展任务、已完成的大纲交付，以及每个项目在生成链路中的状态与关键配置。
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <div style={{
+            padding: "10px 14px",
+            borderRadius: 14,
+            border: `1px solid ${C.border}`,
+            background: C.bgElevated || C.bgSecondary,
+            color: C.textSecondary,
+            fontSize: 12,
+            fontWeight: 600,
+          }}>
+            进行中 {projects.length} 个
+          </div>
+          <div style={{
+            padding: "10px 14px",
+            borderRadius: 14,
+            border: `1px solid ${C.border}`,
+            background: C.bgElevated || C.bgSecondary,
+            color: C.textSecondary,
+            fontSize: 12,
+            fontWeight: 600,
+          }}>
+            已完成 {completedProjects.length} 个
+          </div>
+          <Btn onClick={() => createNewProject()} style={{ minWidth: 156 }}>+ 新建策展项目</Btn>
+        </div>
+      </section>
 
-      <div style={{ marginBottom: 8, fontWeight: 700, color: C.textSecondary, fontSize: 13 }}>进行中</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginBottom: 32 }}>
-        {projects.map((p, i) => (
-          <Card key={p.id || i} style={{ width: '100%' }}>
-            <div style={{ height: 5, background: C.accentPrimary }} />
-            <div style={{ padding: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6, color: C.textPrimary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</div>
-              <div style={{ color: C.accentSecondary, fontWeight: 700, fontSize: 12, marginBottom: 6 }}>
-                Step {p.step} / 5
-              </div>
-              <div style={{ height: 6, background: C.stepInactive, borderRadius: 3, marginBottom: 8, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${(p.step / 5) * 100}%`, background: C.accentPrimary, borderRadius: 3 }} />
-              </div>
-              <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 12 }}>最近编辑：{p.time}</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Btn small onClick={() => handleContinueEdit(p)} disabled={loadingProject === p.id}>
-                  {loadingProject === p.id ? '加载中...' : '继续编辑'}
-                </Btn>
-                <Btn small variant="ghost" onClick={() => handleViewProject(p)} disabled={loadingProject === p.id}>查看</Btn>
-                <Btn small variant="ghost" onClick={(e) => handleDeleteClick(p, e)} disabled={deletingId === p.id} style={{ color: '#e74c3c' }}>
-                  {deletingId === p.id ? '删除中...' : '删除'}
-                </Btn>
-              </div>
+      <section style={{ marginBottom: 36 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, fontFamily: "var(--font-serif)" }}>进行中</div>
+            <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 4 }}>
+              继续编辑、查看当前进度，或直接回到对应步骤。
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: C.textSecondary, fontWeight: 600 }}>
+            共 {projects.length} 个项目
+          </div>
+        </div>
+        {projects.length ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 280px))", gap: 16 }}>
+            {projects.map((p, i) => (
+              <Card
+                key={p.id || i}
+                style={{
+                  width: '100%',
+                  overflow: "hidden",
+                  borderColor: `${C.accentPrimary}18`,
+                  background: C.bgElevated || C.bgSecondary,
+                }}
+              >
+                <div style={{ height: 4, background: `linear-gradient(90deg, ${C.accentPrimary} 0%, ${C.accentSecondary} 100%)` }} />
+                <div style={{ padding: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: C.textPrimary, lineHeight: 1.45, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "var(--font-serif)" }}>
+                        {p.title}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                    <span style={{ fontSize: 12, color: C.textSecondary, whiteSpace: "nowrap" }}>
+                      当前阶段：<span style={{ color: C.textPrimary, fontWeight: 700 }}>{STEPS[Math.max(0, (p.step || 1) - 1)] || '新建策展'}</span>
+                    </span>
+                    <span style={{
+                      color: C.accentPrimary,
+                      fontWeight: 700,
+                      fontSize: 11,
+                      padding: "4px 9px",
+                      borderRadius: 999,
+                      background: `${C.accentPrimary}12`,
+                      border: `1px solid ${C.accentPrimary}16`,
+                      whiteSpace: "nowrap",
+                    }}>
+                      Step {p.step} / 5
+                    </span>
+                    <div style={{ flex: "1 1 72px", minWidth: 64, height: 6, background: C.stepInactive, borderRadius: 999, overflow: "hidden" }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${(p.step / 5) * 100}%`,
+                          background: `linear-gradient(90deg, ${C.accentPrimary} 0%, ${C.accentSecondary} 100%)`,
+                          borderRadius: 999,
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontSize: 11, color: C.textSecondary, whiteSpace: "nowrap" }}>
+                      最近编辑：{p.time}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Btn small onClick={() => handleContinueEdit(p)} disabled={loadingProject === p.id}>
+                      {loadingProject === p.id ? '加载中...' : '继续编辑'}
+                    </Btn>
+                    <Btn small variant="ghost" onClick={() => handleViewProject(p)} disabled={loadingProject === p.id}>查看</Btn>
+                    <Btn
+                      small
+                      variant="ghost"
+                      onClick={(e) => handleDeleteClick(p, e)}
+                      disabled={deletingId === p.id}
+                      style={{ color: C.danger, borderColor: `${C.danger}26`, background: `${C.danger}08` }}
+                    >
+                      {deletingId === p.id ? '删除中...' : '删除'}
+                    </Btn>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <Card style={{ padding: 28, background: C.bgElevated || C.bgSecondary }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, marginBottom: 8, fontFamily: "var(--font-serif)" }}>还没有进行中的项目</div>
+            <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.7, marginBottom: 16 }}>
+              {isLoggedIn
+                ? '新建一个策展任务后，这里会持续记录从叙事方向到完整大纲的进度变化。'
+                : '当前为访客预览模式。登录后，这里只会显示你自己的进行中项目。'}
+            </div>
+            <Btn onClick={() => createNewProject()} style={{ minWidth: 132 }}>{isLoggedIn ? '开始新策展' : '预览新建流程'}</Btn>
+          </Card>
+        )}
+      </section>
+
+      <section>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, fontFamily: "var(--font-serif)" }}>已完成</div>
+            <div style={{ fontSize: 12, color: C.textSecondary, marginTop: 4 }}>
+              查看完整大纲、回顾配置，或重新进入成果页进行导出。
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: C.textSecondary, fontWeight: 600 }}>
+            共 {completedProjects.length} 个项目
+          </div>
+        </div>
+        {completedProjects.length ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 280px))", gap: 16 }}>
+            {completedProjects.map((p, i) => (
+              <Card
+                key={p.id || i}
+                style={{
+                  width: '100%',
+                  overflow: "hidden",
+                  borderColor: `${C.success}1E`,
+                  background: C.bgElevated || C.bgSecondary,
+                }}
+              >
+                <div style={{ height: 4, background: `linear-gradient(90deg, ${C.success} 0%, ${C.accentSecondary} 100%)` }} />
+                <div style={{ padding: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 12 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: C.textPrimary, lineHeight: 1.45, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: "var(--font-serif)" }}>
+                        {p.title}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                    <span style={{ fontSize: 12, color: C.textSecondary, whiteSpace: "nowrap" }}>
+                      当前阶段：<span style={{ color: C.textPrimary, fontWeight: 700 }}>完整大纲</span>
+                    </span>
+                    <span style={{
+                      color: C.success,
+                      fontWeight: 700,
+                      fontSize: 11,
+                      padding: "4px 9px",
+                      borderRadius: 999,
+                      background: `${C.success}12`,
+                      border: `1px solid ${C.success}16`,
+                      whiteSpace: "nowrap",
+                    }}>
+                      Step 5 / 5
+                    </span>
+                    <div style={{ flex: "1 1 72px", minWidth: 64, height: 6, background: C.stepInactive, borderRadius: 999, overflow: "hidden" }}>
+                      <div
+                        style={{
+                          height: "100%",
+                          width: "100%",
+                          background: `linear-gradient(90deg, ${C.success} 0%, ${C.accentSecondary} 100%)`,
+                          borderRadius: 999,
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontSize: 11, color: C.textSecondary, whiteSpace: "nowrap" }}>
+                      最近编辑：{p.time}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Btn small onClick={() => handleViewOutline(p)} disabled={loadingProject === p.id}>
+                      {loadingProject === p.id ? '加载中...' : '查看大纲'}
+                    </Btn>
+                    <Btn small variant="ghost" onClick={() => handleViewProject(p)} disabled={loadingProject === p.id}>查看</Btn>
+                    <Btn
+                      small
+                      variant="ghost"
+                      onClick={(e) => handleDeleteClick(p, e)}
+                      disabled={deletingId === p.id}
+                      style={{ color: C.danger, borderColor: `${C.danger}26`, background: `${C.danger}08` }}
+                    >
+                      {deletingId === p.id ? '删除中...' : '删除'}
+                    </Btn>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <Card style={{ padding: 28, background: C.bgElevated || C.bgSecondary }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: C.textPrimary, marginBottom: 8, fontFamily: "var(--font-serif)" }}>还没有已完成项目</div>
+            <div style={{ fontSize: 13, color: C.textSecondary, lineHeight: 1.7 }}>
+              {isLoggedIn
+                ? '当项目走到完整大纲阶段后，这里会沉淀你的可交付策展成果。'
+                : '登录后，这里只会显示你自己的已完成策展项目。'}
             </div>
           </Card>
-        ))}
-      </div>
-
-      <div style={{ marginBottom: 8, fontWeight: 700, color: C.textSecondary, fontSize: 13 }}>已完成</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20 }}>
-        {completedProjects.map((p, i) => (
-          <Card key={p.id || i} style={{ width: '100%' }}>
-            <div style={{ height: 5, background: C.success }} />
-            <div style={{ padding: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: C.textSecondary, marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</div>
-              <div style={{ color: C.success, fontSize: 12, marginBottom: 12 }}>Step 5 / 5 ✓</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Btn small onClick={() => handleViewOutline(p)} disabled={loadingProject === p.id}>
-                  {loadingProject === p.id ? '加载中...' : '查看大纲'}
-                </Btn>
-                <Btn small variant="ghost" onClick={() => handleViewProject(p)} disabled={loadingProject === p.id}>查看</Btn>
-                <Btn small variant="ghost" onClick={(e) => handleDeleteClick(p, e)} disabled={deletingId === p.id} style={{ color: '#e74c3c' }}>
-                  {deletingId === p.id ? '删除中...' : '删除'}
-                </Btn>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+        )}
+      </section>
 
       {viewingProject && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,.5)",
+          position: "fixed", inset: 0, background: C.overlay,
           display: "flex", alignItems: "center", justifyContent: "center",
           zIndex: 500, padding: 40,
+          backdropFilter: "blur(8px)",
         }}>
           <div style={{
-            background: "#fff", borderRadius: 12, width: "100%", maxWidth: 800,
-            maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,.3)",
+            background: C.bgElevated || "#fff", borderRadius: 22, width: "100%", maxWidth: 860,
+            maxHeight: "90vh", overflow: "auto", boxShadow: C.shadowLg, border: `1px solid ${C.border}`,
           }}>
             <div style={{ padding: "24px 28px", borderBottom: `1px solid ${C.border}` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
-                  <h2 style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, fontFamily: "'Noto Serif SC', serif" }}>
+                  <div style={{ fontSize: 11, color: C.accentSecondary, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 8 }}>
+                    PROJECT OVERVIEW
+                  </div>
+                  <h2 style={{ fontSize: 20, fontWeight: 700, color: C.textPrimary, fontFamily: "var(--font-serif)" }}>
                     {viewingProject.title}
                   </h2>
-                  <div style={{ fontSize: 13, color: C.textSecondary, marginTop: 4 }}>
-                    最近编辑：{viewingProject.time}
+                  <div style={{ fontSize: 13, color: C.textSecondary, marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    <span>最近编辑：{viewingProject.time}</span>
+                    <span>当前进度：Step {viewingProject.step} / 5</span>
                   </div>
                 </div>
                 <button
                   onClick={handleCloseView}
                   style={{
                     width: 32, height: 32, borderRadius: 6, border: "none",
-                    background: C.bgSecondary, cursor: "pointer", fontSize: 18,
+                    background: C.bgMuted || C.bgSecondary, cursor: "pointer", fontSize: 18, color: C.textSecondary,
                     display: "flex", alignItems: "center", justifyContent: "center",
                   }}
                 >×</button>
@@ -682,7 +880,7 @@ export const PageP0 = ({
                   <div style={{ width: 80, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 8 }}>
                     <div style={{
                       width: 32, height: 32, borderRadius: "50%",
-                      background: C.accentSecondary,
+                      background: `linear-gradient(135deg, ${C.accentSecondary} 0%, ${C.accentPrimary} 100%)`,
                       display: "flex", alignItems: "center", justifyContent: "center",
                       color: "#fff", fontWeight: 700, fontSize: 12,
                     }}>
@@ -717,6 +915,7 @@ export const PageP0 = ({
                           background: isDone ? (isCurrent ? C.accentPrimary : C.success) : C.stepInactive,
                           display: "flex", alignItems: "center", justifyContent: "center",
                           color: "#fff", fontWeight: 700, fontSize: 13,
+                          boxShadow: isCurrent ? `0 8px 20px ${C.accentPrimary}24` : "none",
                         }}>
                           {isDone ? (isCurrent ? step : "✓") : step}
                         </div>
@@ -727,7 +926,11 @@ export const PageP0 = ({
                           }} />
                         )}
                       </div>
-                      <div style={{ flex: 1, paddingBottom: step < STEPS.length ? 24 : 0 }}>
+                      <div style={{
+                        flex: 1,
+                        paddingBottom: step < STEPS.length ? 24 : 0,
+                        padding: "2px 0 24px",
+                      }}>
                         <div style={{
                           fontWeight: 700, fontSize: 14, marginBottom: 8,
                           color: isDone ? C.textPrimary : C.textSecondary,
@@ -762,11 +965,13 @@ export const PageP0 = ({
 
       {deleteModal && (
         <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,.5)",
+          position: "fixed", inset: 0, background: C.overlay,
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300,
+          backdropFilter: "blur(6px)",
         }}>
-          <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 360 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>确认删除</h3>
+          <div style={{ background: C.bgElevated || "#fff", borderRadius: 20, padding: 24, width: 380, border: `1px solid ${C.border}`, boxShadow: C.shadowLg }}>
+            <div style={{ fontSize: 11, color: C.danger, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 8 }}>DELETE PROJECT</div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 12, color: C.textPrimary }}>确认删除</h3>
             <p style={{ fontSize: 14, color: C.textSecondary, marginBottom: 20 }}>
               确定要删除项目「{deleteModal.title}」吗？此操作不可撤销。
             </p>

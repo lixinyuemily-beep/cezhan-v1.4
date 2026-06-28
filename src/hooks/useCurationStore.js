@@ -1,6 +1,16 @@
 import { useState, useCallback, useEffect } from 'react';
 import { api } from '../api/client';
 import { generateDefaultTextSections } from '../data/textTemplates';
+import {
+  getExhibitImage,
+  getExhibitIntroduction,
+  getExhibitMaterial,
+  getExhibitName,
+  getExhibitOther,
+  getExhibitPlace,
+  getExhibitTime,
+  normalizeImportedExhibit,
+} from '../utils/exhibitFields';
 
 const initialProject = {
   id: null,
@@ -25,8 +35,9 @@ const DEFAULT_NARRATIVE_RHYTHM = {
 const DEFAULT_ADVANCED_SETTINGS = {
   unitCount: 3,
   unitCountMax: 6,
+  itemsPerUnitMin: 5,
   itemsPerUnit: 10,
-  itemsPerUnitMax: 20,
+  itemsPerUnitMax: 10,
   temperature: 0.9,
 };
 
@@ -63,12 +74,17 @@ function readStoredAuthSession() {
 
 function normalizeAdvancedSettings(settings = {}) {
   const unitCountMax = Math.max(2, Number(settings.unitCountMax ?? DEFAULT_ADVANCED_SETTINGS.unitCountMax));
-  const itemsPerUnitMax = Math.max(2, Number(settings.itemsPerUnitMax ?? DEFAULT_ADVANCED_SETTINGS.itemsPerUnitMax));
+  const legacyItemsPerUnit = Number(settings.itemsPerUnit ?? DEFAULT_ADVANCED_SETTINGS.itemsPerUnit);
+  const rawItemsPerUnitMin = Number(settings.itemsPerUnitMin ?? Math.min(DEFAULT_ADVANCED_SETTINGS.itemsPerUnitMin, legacyItemsPerUnit));
+  const rawItemsPerUnitMax = Number(settings.itemsPerUnitMax ?? legacyItemsPerUnit);
+  const itemsPerUnitMin = Math.max(2, Math.min(rawItemsPerUnitMin, rawItemsPerUnitMax));
+  const itemsPerUnitMax = Math.max(itemsPerUnitMin, rawItemsPerUnitMax);
 
   return {
     unitCount: Math.min(unitCountMax, Math.max(2, Number(settings.unitCount ?? DEFAULT_ADVANCED_SETTINGS.unitCount))),
     unitCountMax,
-    itemsPerUnit: Math.min(itemsPerUnitMax, Math.max(2, Number(settings.itemsPerUnit ?? DEFAULT_ADVANCED_SETTINGS.itemsPerUnit))),
+    itemsPerUnitMin,
+    itemsPerUnit: itemsPerUnitMax,
     itemsPerUnitMax,
     temperature: Number(settings.temperature ?? DEFAULT_ADVANCED_SETTINGS.temperature),
   };
@@ -84,6 +100,8 @@ export function useCurationStore() {
   const [authUser, setAuthUser] = useState(storedAuthSession?.user || null);
   const [authInitialized, setAuthInitialized] = useState(false);
   const [guestUserId] = useState(() => getInitialGuestUserId());
+  const [authPanelOpen, setAuthPanelOpen] = useState(false);
+  const [authPromptMessage, setAuthPromptMessage] = useState('');
   
   const [currentProject, setCurrentProject] = useState(null);
   
@@ -96,7 +114,7 @@ export function useCurationStore() {
   
   const [uploaded, setUploaded] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(true);
-  const [selectedNarrative, setSelectedNarrative] = useState(0);
+  const [selectedNarrative, setSelectedNarrative] = useState(null);
   const [narrativeOptions, setNarrativeOptions] = useState([]);
   const [units, setUnits] = useState([]);
   const [exhibitConfirmations, setExhibitConfirmations] = useState({});
@@ -110,7 +128,8 @@ export function useCurationStore() {
     const saved = localStorage.getItem('darkMode');
     return saved ? JSON.parse(saved) : false;
   });
-  const activeUserId = authUser?.id || guestUserId;
+  const isLoggedIn = !!authUser;
+  const activeUserId = authUser?.id || null;
 
   useEffect(() => {
     localStorage.setItem('darkMode', JSON.stringify(darkMode));
@@ -167,6 +186,12 @@ export function useCurationStore() {
     }, duration);
   }, []);
 
+  const requireLogin = useCallback((actionLabel = '继续操作') => {
+    setAuthPromptMessage(`登录后即可${actionLabel}，并查看你自己的项目与展品数据。`);
+    setAuthPanelOpen(true);
+    showToast('请先登录后继续', 'info');
+  }, [showToast]);
+
   const navigateTo = useCallback((page) => {
     if (page.startsWith('step')) {
       const step = parseInt(page.replace('step', ''), 10);
@@ -191,6 +216,12 @@ export function useCurationStore() {
 
   const goNextStep = useCallback(async () => {
     const nextStep = currentStep + 1;
+    if (currentStep === 1 && (selectedNarrative === null || selectedNarrative === undefined || !narrativeOptions[selectedNarrative])) {
+      showToast('请先选择一个叙事方向', 'info');
+      setIsGenerating(false);
+      return;
+    }
+
     if (nextStep <= 5) {
       if (currentProject?.id) {
         try {
@@ -199,8 +230,10 @@ export function useCurationStore() {
           };
           
           if (currentStep === 1) {
-            updateData.selected_narrative = selectedNarrative;
-            updateData.narrative = narrativeOptions[selectedNarrative] || {};
+            if (selectedNarrative !== null && selectedNarrative !== undefined) {
+              updateData.selected_narrative = selectedNarrative;
+              updateData.narrative = narrativeOptions[selectedNarrative] || {};
+            }
             updateData.narrative_options = narrativeOptions;
             updateData.exhibition_title = exhibitTitle;
             updateData.uploaded_exhibits = uploadedExhibits;
@@ -403,7 +436,7 @@ export function useCurationStore() {
         setIsGenerating(false);
       }
     }
-  }, [currentStep, units, currentProject, selectedNarrative, narrativeOptions, keptExhibits, exhibitTitle, textSections, exhibitConfirmations, uploadedExhibits, additionalIntent, narrativeRhythm]);
+  }, [currentStep, units, currentProject, selectedNarrative, narrativeOptions, keptExhibits, exhibitTitle, textSections, exhibitConfirmations, uploadedExhibits, additionalIntent, narrativeRhythm, showToast]);
 
   const goPrevStep = useCallback(() => {
     const prevStep = currentStep - 1;
@@ -422,7 +455,7 @@ export function useCurationStore() {
     setNarrativeRhythm(DEFAULT_NARRATIVE_RHYTHM);
     setAdvancedSettings(DEFAULT_ADVANCED_SETTINGS);
     setShowAdvanced(true);
-    setSelectedNarrative(0);
+    setSelectedNarrative(null);
     setUnits([]);
     setExhibitConfirmations({});
     setKeptExhibits({});
@@ -434,6 +467,10 @@ export function useCurationStore() {
   }, []);
 
   const saveAIGeneratedData = useCallback(async (projectId, aiResult, llmParams) => {
+    if (!activeUserId) {
+      requireLogin('保存并编辑策展项目');
+      return;
+    }
     const projectTitle = llmParams.exhibition_title || aiResult.data.narrative.title;
     
     try {
@@ -447,6 +484,9 @@ export function useCurationStore() {
         llm_params: llmParams,
         uploaded_exhibits: llmParams.exhibits,
         exhibition_title: llmParams.exhibition_title,
+        narrative: null,
+        narrative_options: aiResult.data.narrativeOptions || [],
+        selected_narrative: null,
       };
       
       const backendProject = await api.projects.create(createData);
@@ -460,9 +500,9 @@ export function useCurationStore() {
         llmParams: llmParams,
         uploadedExhibits: llmParams.exhibits,
         exhibitTitle: llmParams.exhibition_title,
-        narrative: aiResult.data.narrative,
+        narrative: null,
         narrativeOptions: aiResult.data.narrativeOptions,
-        selectedNarrative: 0,
+        selectedNarrative: null,
         units: [],
         textSections: [],
         exhibitRecommendations: [],
@@ -477,7 +517,7 @@ export function useCurationStore() {
       setCurrentPage('step1');
       setUnits([]);
       setTextSections([]);
-      setSelectedNarrative(0);
+      setSelectedNarrative(null);
       setNarrativeOptions(aiResult.data.narrativeOptions || []);
     } catch (error) {
       console.error('创建项目失败:', error);
@@ -488,8 +528,9 @@ export function useCurationStore() {
         time: '刚刚',
         exhibitCount: llmParams.exhibits.length,
         llmParams: llmParams,
-        narrative: aiResult.data.narrative,
+        narrative: null,
         narrativeOptions: aiResult.data.narrativeOptions,
+        selectedNarrative: null,
         units: [],
         textSections: [],
         exhibitRecommendations: [],
@@ -504,12 +545,17 @@ export function useCurationStore() {
       setCurrentPage('step1');
       setUnits([]);
       setTextSections([]);
-      setSelectedNarrative(0);
+      setSelectedNarrative(null);
       setNarrativeOptions(aiResult.data.narrativeOptions || []);
     }
-  }, [activeUserId]);
+  }, [activeUserId, requireLogin]);
 
   const refreshProjects = useCallback(async (userId = activeUserId) => {
+    if (!userId) {
+      setProjects([]);
+      setCompletedProjects([]);
+      return;
+    }
     try {
       const [response, completedResponse] = await Promise.all([
         api.projects.list(userId),
@@ -526,7 +572,7 @@ export function useCurationStore() {
           theme: p.theme,
           narrative: p.narrative,
           narrativeOptions: p.narrative_options,
-          selectedNarrative: p.selected_narrative || 0,
+          selectedNarrative: p.selected_narrative ?? null,
           llmParams: p.llm_params,
           units: [],
           textSections: [],
@@ -540,7 +586,7 @@ export function useCurationStore() {
         time: p.time || new Date(p.created_at).toLocaleDateString(),
         narrative: p.narrative,
         narrativeOptions: p.narrative_options || [],
-        selectedNarrative: p.selected_narrative || 0,
+        selectedNarrative: p.selected_narrative ?? null,
         llmParams: p.llm_params,
         exhibitionTitle: p.exhibition_title,
         uploadedExhibits: p.uploaded_exhibits || [],
@@ -586,7 +632,7 @@ export function useCurationStore() {
     if (project._fromApi) {
       projectData = {
         ...project,
-        selectedNarrative: project.selected_narrative || 0,
+        selectedNarrative: project.selectedNarrative ?? project.selected_narrative ?? null,
         narrative: project.narrative,
         narrativeOptions: project.narrative_options || [],
         llmParams: project.llm_params,
@@ -600,7 +646,7 @@ export function useCurationStore() {
     } else {
       projectData = {
         ...project,
-        selectedNarrative: project.selectedNarrative || project.selected_narrative || 0,
+        selectedNarrative: project.selectedNarrative ?? project.selected_narrative ?? null,
         narrative: project.narrative || project.narrative,
         narrativeOptions: project.narrativeOptions || project.narrative_options || [],
         llmParams: project.llmParams || project.llm_params,
@@ -668,13 +714,13 @@ export function useCurationStore() {
           
           const exhibitsData = {};
           for (const unit of unitsData) {
-            const unitExhibits = await api.exhibits.list({ unit_id: unit.id });
+            const unitExhibits = await api.exhibits.list({ unit_id: unit.id, user_id: activeUserId });
             if (unitExhibits && unitExhibits.length > 0) {
               exhibitsData[unit.id] = unitExhibits.map(ex => ({
-                ...ex,
-                mat: ex.material || ex.mat || '',
-                sz: ex.size || ex.sz || '',
-                era: ex.era || '',
+                ...normalizeImportedExhibit(ex),
+                mat: getExhibitMaterial(ex),
+                sz: getExhibitOther(ex),
+                era: getExhibitTime(ex),
                 id: ex.id || ex.编号 || '',
                 stars: ex.confidence || ex.stars || 5,
                 ctx: ex.ctx || "用户保留",
@@ -725,7 +771,7 @@ export function useCurationStore() {
     setNarrativeRhythm(DEFAULT_NARRATIVE_RHYTHM);
     setAdvancedSettings(DEFAULT_ADVANCED_SETTINGS);
     setShowAdvanced(true);
-    setSelectedNarrative(0);
+    setSelectedNarrative(null);
     setUnits([]);
     setExhibitConfirmations({});
     setKeptExhibits({});
@@ -754,12 +800,18 @@ export function useCurationStore() {
       exhibition_title: exhibitTitle || null,
       exhibits: uploadedExhibits.map(ex => ({
         id: ex.id || ex.编号 || ex.ID || null,
-        name: ex.名称 || ex.name || ex.品名 || null,
-        era: ex.年代 || ex.时代 || null,
-        material: ex.材质 || ex.material || null,
-        size: ex.尺寸 || ex.size || null,
-        origin: ex.出土地 || ex.产地 || ex.来源 || null,
-        description: ex.描述 || ex.description || ex.简介 || null,
+        name: getExhibitName(ex) || null,
+        time: getExhibitTime(ex) || null,
+        place: getExhibitPlace(ex) || null,
+        material: getExhibitMaterial(ex) || null,
+        other: getExhibitOther(ex) || null,
+        introduction: getExhibitIntroduction(ex) || null,
+        image_url: getExhibitImage(ex) || null,
+        // 兼容后端旧逻辑
+        era: getExhibitTime(ex) || null,
+        size: getExhibitOther(ex) || null,
+        origin: getExhibitPlace(ex) || null,
+        description: getExhibitIntroduction(ex) || null,
       })),
       additional_intent: additionalIntent || null,
       narrative_rhythm: narrativeRhythm,
@@ -778,7 +830,7 @@ export function useCurationStore() {
           exhibition_title: exhibitTitle || currentProject.exhibitionTitle || '',
           narrative: currentProject.narrative || {},
           narrative_options: narrativeOptions || [],
-          selected_narrative: selectedNarrative ?? currentProject.selectedNarrative ?? 0,
+          selected_narrative: selectedNarrative ?? currentProject.selectedNarrative ?? null,
           llm_params: currentProject.llmParams || {
             exhibits: uploadedExhibits,
             exhibition_title: exhibitTitle,
@@ -805,7 +857,7 @@ export function useCurationStore() {
           exhibitionTitle: exhibitTitle || currentProject.exhibitionTitle || '',
           narrative: currentProject.narrative || {},
           narrativeOptions: narrativeOptions || [],
-          selectedNarrative: selectedNarrative ?? currentProject.selectedNarrative ?? 0,
+          selectedNarrative: selectedNarrative ?? currentProject.selectedNarrative ?? null,
           llmParams: currentProject.llmParams,
           uploadedExhibits: uploadedExhibits || currentProject.uploadedExhibits || [],
           exhibitConfirmations: exhibitConfirmations,
@@ -852,6 +904,8 @@ export function useCurationStore() {
         user: response.user,
       });
       setAuthUser(response.user);
+      setAuthPanelOpen(false);
+      setAuthPromptMessage('');
       setProjects([]);
       setCompletedProjects([]);
       resetProjectState();
@@ -868,6 +922,8 @@ export function useCurationStore() {
   const logout = useCallback(() => {
     setAuthSession(null);
     setAuthUser(null);
+    setAuthPanelOpen(false);
+    setAuthPromptMessage('');
     setProjects([]);
     setCompletedProjects([]);
     resetProjectState();
@@ -927,8 +983,14 @@ export function useCurationStore() {
     authSession,
     authUser,
     authInitialized,
+    isLoggedIn,
     guestUserId,
     activeUserId,
+    authPanelOpen,
+    setAuthPanelOpen,
+    authPromptMessage,
+    setAuthPromptMessage,
+    requireLogin,
     sendEmailCode,
     verifyEmailCode,
     logout,

@@ -1,7 +1,8 @@
 """
-AI 服务 - 元景大模型 API 调用 (OPENAI 兼容模式)
+AI 服务 - DeepSeek API 调用 (OpenAI 兼容模式)
 """
 import json
+import re
 import time
 from typing import Optional, Dict, List, Any
 from openai import OpenAI
@@ -10,7 +11,64 @@ from .. import prompts
 
 
 class AIService:
-    """元景大模型 AI 服务类 (使用 OPENAI 兼容模式)"""
+    """DeepSeek AI 服务类 (使用 OpenAI 兼容模式)"""
+
+    @staticmethod
+    def _is_structure_only_unit(unit: Dict[str, Any]) -> bool:
+        tag = str(unit.get("tag") or "").strip()
+        return tag in {"序章", "尾声"}
+
+    @staticmethod
+    def _get_exhibit_time(exhibit: Dict[str, Any]) -> str:
+        return str(
+            exhibit.get("time")
+            or exhibit.get("era")
+            or exhibit.get("年代")
+            or exhibit.get("时间")
+            or ""
+        ).strip()
+
+    @staticmethod
+    def _get_exhibit_place(exhibit: Dict[str, Any]) -> str:
+        return str(
+            exhibit.get("place")
+            or exhibit.get("地点")
+            or exhibit.get("origin")
+            or exhibit.get("出土地")
+            or exhibit.get("产地")
+            or ""
+        ).strip()
+
+    @staticmethod
+    def _get_exhibit_material(exhibit: Dict[str, Any]) -> str:
+        return str(
+            exhibit.get("material")
+            or exhibit.get("mat")
+            or exhibit.get("材质")
+            or ""
+        ).strip()
+
+    @staticmethod
+    def _get_exhibit_other(exhibit: Dict[str, Any]) -> str:
+        return str(
+            exhibit.get("other")
+            or exhibit.get("size")
+            or exhibit.get("sz")
+            or exhibit.get("其他")
+            or exhibit.get("尺寸")
+            or ""
+        ).strip()
+
+    @staticmethod
+    def _get_exhibit_intro(exhibit: Dict[str, Any]) -> str:
+        return str(
+            exhibit.get("introduction")
+            or exhibit.get("description")
+            or exhibit.get("介绍")
+            or exhibit.get("描述")
+            or exhibit.get("简介")
+            or ""
+        ).strip()
 
     @classmethod
     def _describe_tension_level(cls, value: Any) -> str:
@@ -98,30 +156,51 @@ class AIService:
             f"{section_text}\n"
             "- 生成内容时，不要机械复述这些规则，而要把它们内化为自然、连贯的策展表达。"
         )
+
+    @classmethod
+    def _sanitize_narrative_desc(cls, text: Any) -> str:
+        """移除不适合直接暴露给用户的张力参数痕迹。"""
+        desc = str(text or "").strip()
+        if not desc:
+            return ""
+
+        desc = re.sub(r"[（(]\s*张力\s*[:：]?\s*\d+\s*[）)]", "", desc)
+        desc = re.sub(r"张力\s*[:：]?\s*\d+", "", desc)
+        desc = re.sub(r"(开场|铺垫|转折|深入|高潮|余韵)\s*[:：]?\s*\d+", r"\1", desc)
+        desc = re.sub(r"[（(]\s*\d+\s*[）)]", "", desc)
+        desc = re.sub(r"\s{2,}", " ", desc)
+        desc = re.sub(r"([，、；。])[，、；。]+", r"\1", desc)
+        return desc.strip(" ，,；;。")
+
+    @staticmethod
+    def _sanitize_narrative_title(text: Any) -> str:
+        title = str(text or "").strip()
+        title = re.sub(r"\s{2,}", " ", title)
+        return title.strip(" \t\r\n-_:：，,。")
     
     @classmethod
     def _get_client(cls) -> OpenAI:
         """获取 OpenAI 客户端"""
         return OpenAI(
-            api_key=settings.yuanjing_api_key,
-            base_url=settings.yuanjing_base_url,
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
         )
     
     @classmethod
     def chat_completion(
         cls,
         messages: List[Dict[str, str]],
-        model: str = "sea-llm-235b",
+        model: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 2000,
         **kwargs
     ) -> Dict[str, Any]:
         """
-        调用元景大模型进行对话补全
+        调用 DeepSeek 模型进行对话补全
         
         Args:
             messages: 消息列表，格式为 [{"role": "user/assistant/system", "content": "..."}]
-            model: 模型名称 (默认 sea-llm-235b)
+            model: 模型名称，默认使用环境变量 `DEEPSEEK_MODEL`
             temperature: 温度参数
             max_tokens: 最大 token 数
             **kwargs: 其他参数
@@ -130,9 +209,10 @@ class AIService:
             包含回复内容的字典
         """
         client = cls._get_client()
+        resolved_model = model or settings.deepseek_model
         
         response = client.chat.completions.create(
-            model=model,
+            model=resolved_model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -175,16 +255,31 @@ class AIService:
             叙事方案列表
         """
         random_suffix = str(int(time.time() * 1000))[-6:]
+        normalized_theme = str(theme or "").strip()
+        has_user_theme = bool(normalized_theme)
+        theme_display = normalized_theme if has_user_theme else "（用户未填写，请基于展品池拟定题目）"
+        theme_rule = (
+            f'- 用户已提供展览主题，3个方案的title都必须直接使用「{normalized_theme}」，不要改字、不要扩写、不要另拟标题。'
+            if has_user_theme else
+            '- 用户未提供展览主题，请你基于展品池为每个方案拟定一个简洁、可展示的题目；3个方案的title必须彼此不同，且不能使用“策展主题”“未命名展览”“方案A”之类占位词。'
+        )
+        example_json = (
+            f'[{{"title": "{normalized_theme}", "desc": "描述..."}}]'
+            if has_user_theme else
+            '[{"title": "玉礼与王朝秩序", "desc": "从礼制与权力象征切入，组织展品之间的制度线索。"}, {"title": "青铜时代的工艺回响", "desc": "从材料、铸造与纹饰演进切入，展现技术与审美的同步变化。"}]'
+        )
         
         additional_info = f"\n补充策展意图：{additional_intent}" if additional_intent else ""
         rhythm_instruction = cls._build_rhythm_instruction(narrative_rhythm)
         system_prompt = prompts.NARRATIVE_SYSTEM + f"\n这是第{random_suffix}次请求，请给出独特的方案。建议设计{unit_count}个单元。"
         user_prompt = prompts.NARRATIVE_USER.format(
-            theme=theme,
+            theme=theme_display,
             exhibit_count=exhibit_count,
             exhibit_info=exhibit_info,
             additional_intent=additional_info,
-            rhythm_instruction=rhythm_instruction
+            rhythm_instruction=rhythm_instruction,
+            theme_rule=theme_rule,
+            example_json=example_json,
         )
         
         result = cls.chat_completion(
@@ -204,17 +299,28 @@ class AIService:
             
             options = json.loads(content.strip())
             normalized_options = []
-            for option in options[:3]:
+            for index, option in enumerate(options[:3]):
+                option_title = ""
+                option_desc = ""
+                if isinstance(option, dict):
+                    option_title = cls._sanitize_narrative_title(option.get("title", ""))
+                    option_desc = cls._sanitize_narrative_desc(option.get("desc", ""))
                 normalized_options.append({
-                    "title": theme,
-                    "desc": option.get("desc", "") if isinstance(option, dict) else ""
+                    "title": normalized_theme if has_user_theme else (option_title or f"未命名方案 {index + 1}"),
+                    "desc": option_desc
                 })
             return normalized_options
         except Exception as e:
+            if has_user_theme:
+                return [
+                    {"title": normalized_theme, "desc": "以文明交流为切入点，组织展品之间的互动关系。"},
+                    {"title": normalized_theme, "desc": "以技术传播与工艺演进为主线，突出材料与制作方法的流动。"},
+                    {"title": normalized_theme, "desc": "以艺术风格与审美共鸣为重点，强调不同地域之间的视觉呼应。"}
+                ]
             return [
-                {"title": theme, "desc": "以文明交流为切入点，组织展品之间的互动关系。"},
-                {"title": theme, "desc": "以技术传播与工艺演进为主线，突出材料与制作方法的流动。"},
-                {"title": theme, "desc": "以艺术风格与审美共鸣为重点，强调不同地域之间的视觉呼应。"}
+                {"title": "器物与文明的回声", "desc": "以文明交流为切入点，组织展品之间的互动关系。"},
+                {"title": "工艺如何塑造时代", "desc": "以技术传播与工艺演进为主线，突出材料与制作方法的流动。"},
+                {"title": "风格的迁徙与共鸣", "desc": "以艺术风格与审美共鸣为重点，强调不同地域之间的视觉呼应。"}
             ]
     
     @classmethod
@@ -240,7 +346,7 @@ class AIService:
         """
         exhibit_list = exhibit_list or []
         exhibit_summary = "\n".join([
-            f"- {ex.get('name', '未知展品')}: {ex.get('era', '')} {ex.get('material', '')}"
+            f"- {ex.get('name', '未知展品')}: {cls._get_exhibit_time(ex)} {cls._get_exhibit_place(ex)} {cls._get_exhibit_material(ex)}"
             for ex in exhibit_list[:20]
         ])
         rhythm_instruction = cls._build_rhythm_instruction(narrative_rhythm)
@@ -256,30 +362,106 @@ class AIService:
             unit_count=unit_count
         )
         
-        result = cls.chat_completion(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7
-        )
-        
-        try:
-            content = result["content"]
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0]
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0]
-            
-            units = json.loads(content.strip())
-            return units
-        except Exception as e:
-            return [
-                {"tag": "第一单元", "title": "开篇", "description": "展览引言", "theme": "引言"},
-                {"tag": "第二单元", "title": "核心展示", "description": "主要展品", "theme": "展示"},
-                {"tag": "第三单元", "title": "文化解读", "description": "文化内涵", "theme": "文化"},
-                {"tag": "第四单元", "title": "总结", "description": "展览结语", "theme": "结语"}
-            ]
+        cn_numbers = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+
+        def regular_tag(index: int) -> str:
+            if 1 <= index <= 10:
+                return f"第{cn_numbers[index]}单元"
+            return f"第{index}单元"
+
+        expected_tags = ["序章"] + [regular_tag(i + 1) for i in range(max(unit_count, 0))] + ["尾声"]
+        last_error: Optional[Exception] = None
+
+        for _ in range(2):
+            result = cls.chat_completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=12000,
+            )
+
+            try:
+                content = str(result.get("content") or "").strip()
+                candidates = []
+
+                if "```json" in content:
+                    candidates.append(content.split("```json", 1)[1].split("```", 1)[0].strip())
+                if "```" in content:
+                    candidates.append(content.split("```", 1)[1].split("```", 1)[0].strip())
+                candidates.append(content)
+
+                list_start = content.find("[")
+                list_end = content.rfind("]")
+                if list_start != -1 and list_end != -1 and list_end > list_start:
+                    candidates.append(content[list_start:list_end + 1].strip())
+
+                parsed_units = None
+                for candidate in candidates:
+                    if not candidate:
+                        continue
+                    try:
+                        parsed_units = json.loads(candidate)
+                        if isinstance(parsed_units, list):
+                            break
+                    except Exception:
+                        continue
+
+                if not isinstance(parsed_units, list):
+                    raise ValueError("units response is not a valid JSON array")
+
+                normalized_units: List[Dict[str, Any]] = []
+
+                for index, expected_tag in enumerate(expected_tags):
+                    source = parsed_units[index] if index < len(parsed_units) and isinstance(parsed_units[index], dict) else {}
+                    is_structure_only = expected_tag in {"序章", "尾声"}
+                    narrative_text = str(
+                        source.get("narrative")
+                        or source.get("desc")
+                        or source.get("description")
+                        or ""
+                    ).strip()
+                    description_text = str(
+                        source.get("description")
+                        or source.get("narrative")
+                        or source.get("desc")
+                        or ""
+                    ).strip()
+                    title_text = str(source.get("title") or "").strip()
+
+                    fallback_titles = {
+                        "序章": "序章",
+                        "尾声": "尾声",
+                    }
+                    fallback_narratives = {
+                        "序章": "交代主题缘起与观看入口，为正文展开蓄势。",
+                        "尾声": "回望全文主旨，完成情绪收束与余韵延展。",
+                    }
+
+                    normalized_unit: Dict[str, Any] = {
+                        "tag": expected_tag,
+                        "title": title_text or fallback_titles.get(expected_tag, expected_tag),
+                        "description": description_text or narrative_text or fallback_narratives.get(expected_tag, ""),
+                        "narrative": narrative_text or description_text or fallback_narratives.get(expected_tag, ""),
+                        "theme": str(source.get("theme") or "").strip(),
+                    }
+
+                    if not is_structure_only:
+                        normalized_unit["items"] = int(source.get("items") or 0)
+
+                    normalized_units.append(normalized_unit)
+
+                main_units = [u for u in normalized_units if u.get("tag") not in {"序章", "尾声"}]
+                if not main_units or any(not str(u.get("title") or "").strip() or str(u.get("title") or "").strip() == str(u.get("tag") or "").strip() for u in main_units):
+                    raise ValueError("units response does not contain meaningful unit titles")
+
+                return normalized_units
+            except Exception as e:
+                last_error = e
+                continue
+
+        raise ValueError(f"单元结构生成失败：模型未返回有效的单元结构，请重试。{f' 最后一次错误：{last_error}' if last_error else ''}")
     
     @classmethod
     def recommend_exhibits(
@@ -288,6 +470,7 @@ class AIService:
         unit_theme: str,
         unit_description: str,
         narrative: Dict = None,
+        min_count: int = 5,
         max_count: int = 10
     ) -> List[Dict[str, Any]]:
         """
@@ -298,13 +481,14 @@ class AIService:
             unit_theme: 单元主题
             unit_description: 单元描述
             narrative: 叙事方案
+            min_count: 建议最少推荐数量
             max_count: 最大推荐数量
         
         Returns:
             推荐展品列表（带置信度）
         """
         exhibit_info = "\n".join([
-            f"{i+1}. {ex.get('name', '未知')} ({ex.get('era', '')}, {ex.get('material', '')})"
+            f"{i+1}. {ex.get('name', '未知')} ({cls._get_exhibit_time(ex)}, {cls._get_exhibit_place(ex)}, {cls._get_exhibit_material(ex)})"
             for i, ex in enumerate(exhibit_pool)
         ])
         
@@ -318,6 +502,8 @@ class AIService:
             narrative_title=narrative.get('title', ''),
             exhibit_pool=exhibit_info,
             total_exhibits=len(exhibit_pool),
+            items_min_count=min_count,
+            items_max_count=max_count,
             items_count=max_count
         )
         
@@ -403,12 +589,19 @@ class AIService:
         
         for idx, unit in enumerate(units):
             unit_theme = unit.get('title', '')
-            unit_desc = unit.get('description', '')
-            unit_items = unit.get('items', 5)
+            unit_desc = unit.get('description') or unit.get('desc', '')
+            unit_items_min = int(unit.get('itemsMin') or unit.get('items_min') or min(unit.get('items', 5), 5))
+            unit_items = int(unit.get('itemsMax') or unit.get('items_max') or unit.get('items', 5))
+            unit_items_min = max(0, min(unit_items_min, unit_items))
             
-            print(f"[AI Service] Unit {idx}: {unit_theme}, items: {unit_items}")
+            print(f"[AI Service] Unit {idx}: {unit_theme}, items: {unit_items_min}-{unit_items}")
             
             unit_key = str(unit.get('id', idx))
+
+            if cls._is_structure_only_unit(unit):
+                recommendations[unit_key] = []
+                print(f"[AI Service] Unit {idx}: skipped because it is {unit.get('tag')}")
+                continue
             
             remaining_pool = [ex for i, ex in enumerate(exhibit_pool) if i not in used_indices]
             
@@ -421,6 +614,7 @@ class AIService:
                 unit_theme=unit_theme,
                 unit_description=unit_desc,
                 narrative=narrative,
+                min_count=unit_items_min,
                 max_count=unit_items
             )
             
@@ -488,7 +682,7 @@ class AIService:
             HTML格式的文本内容
         """
         exhibit_info = "\n".join([
-            f"- {ex.get('name', '未知')}: {ex.get('era', '')} {ex.get('material', '')} {ex.get('size', '')}"
+            f"- {ex.get('name', '未知')}: 时间={cls._get_exhibit_time(ex)}；地点={cls._get_exhibit_place(ex)}；材质={cls._get_exhibit_material(ex)}；其他={cls._get_exhibit_other(ex)}；介绍={cls._get_exhibit_intro(ex)}"
             for ex in exhibits
         ])
         rhythm_instruction = cls._build_rhythm_instruction(narrative_rhythm, section_type="text_section")
@@ -646,13 +840,14 @@ class AIService:
             f"- {s.get('title', '')}"
             for s in text_sections
         ])
+        theme = narrative.get('title', '展览')
         
         system_prompt = prompts.OUTLINE_SYSTEM
         user_prompt = prompts.OUTLINE_USER.format(
             theme=theme,
             narrative_title=narrative.get('title', ''),
             narrative_desc=narrative.get('desc', ''),
-            units_summary=units_info
+            units_summary=f"{units_info}\n\n相关文本段落：\n{sections_info}"
         )
         
         result = cls.chat_completion(

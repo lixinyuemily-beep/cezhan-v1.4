@@ -1,6 +1,9 @@
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const EXHIBIT_PARSE_START_TIMEOUT = 30 * 60 * 1000;
+const EXHIBIT_PARSE_POLL_INTERVAL_MS = 1200;
+const AUTH_STORAGE_KEY = 'curation_auth_session';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -10,9 +13,36 @@ const apiClient = axios.create({
   },
 });
 
+function readStoredAuthSession() {
+  if (typeof localStorage === 'undefined') return null;
+  const saved = localStorage.getItem(AUTH_STORAGE_KEY);
+  if (!saved) return null;
+  try {
+    return JSON.parse(saved);
+  } catch (error) {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    return null;
+  }
+}
+
+apiClient.interceptors.request.use((config) => {
+  const session = readStoredAuthSession();
+  const token = session?.access_token;
+  if (token && !config.headers?.Authorization) {
+    config.headers = {
+      ...config.headers,
+      Authorization: `Bearer ${token}`,
+    };
+  }
+  return config;
+});
+
 apiClient.interceptors.response.use(
   (response) => response.data,
   (error) => {
+    if (error.code === 'ECONNABORTED') {
+      return Promise.reject(new Error('请求超时，请稍后重试；如果上传的是带大量图片的 Excel，请尽量控制文件大小。'));
+    }
     if (error.response?.status !== 404) {
       const message = error.response?.data?.detail || error.message || '请求失败';
       console.error('API Error:', message);
@@ -20,6 +50,30 @@ apiClient.interceptors.response.use(
     return Promise.reject(new Error(error.response?.data?.detail || error.message || '请求失败'));
   }
 );
+
+const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+async function waitForExhibitParseTask(taskId, options = {}) {
+  const intervalMs = Number(options.intervalMs || EXHIBIT_PARSE_POLL_INTERVAL_MS);
+
+  for (let attempt = 0; attempt < 1800; attempt += 1) {
+    const task = await apiClient.get(`/exhibits/parse-template-tasks/${taskId}`, {
+      params: options.userId ? { user_id: options.userId } : undefined,
+    });
+    options.onTaskProgress?.(task);
+
+    if (task.status === 'success') {
+      return task.result;
+    }
+    if (task.status === 'failed') {
+      throw new Error(task.error || '文件解析失败');
+    }
+
+    await sleep(intervalMs);
+  }
+
+  throw new Error('解析任务等待超时，请稍后重试。');
+}
 
 export const api = {
   auth: {
@@ -50,14 +104,32 @@ export const api = {
   
   exhibits: {
     list: (params) => apiClient.get('/exhibits', { params }),
-    getAll: () => apiClient.get('/exhibits/all'),
-    search: (keyword) => apiClient.get('/exhibits/search', { params: { keyword } }),
-    get: (exhibitId) => apiClient.get(`/exhibits/${exhibitId}`),
-    create: (data) => apiClient.post('/exhibits', data),
-    update: (exhibitId, data) => apiClient.put(`/exhibits/${exhibitId}`, data),
-    delete: (exhibitId) => apiClient.delete(`/exhibits/${exhibitId}`),
-    createBatch: (data) => apiClient.post('/exhibits/batch', data),
-    deleteAll: () => apiClient.delete('/exhibits/all'),
+    getAll: (params = {}) => apiClient.get('/exhibits/all', { params }),
+    search: (keyword, params = {}) => apiClient.get('/exhibits/search', { params: { keyword, ...params } }),
+    startParseTemplateTask: (file, options = {}) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return apiClient.post('/exhibits/parse-template', formData, {
+        params: options.userId ? { user_id: options.userId } : undefined,
+        timeout: EXHIBIT_PARSE_START_TIMEOUT,
+        onUploadProgress: options.onUploadProgress,
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+    },
+    getParseTemplateTask: (taskId, params = {}) => apiClient.get(`/exhibits/parse-template-tasks/${taskId}`, { params }),
+    parseTemplate: async (file, options = {}) => {
+      const task = await api.exhibits.startParseTemplateTask(file, options);
+      options.onTaskProgress?.(task);
+      return waitForExhibitParseTask(task.task_id, options);
+    },
+    get: (exhibitId, params = {}) => apiClient.get(`/exhibits/${exhibitId}`, { params }),
+    create: (data, params = {}) => apiClient.post('/exhibits', data, { params }),
+    update: (exhibitId, data, params = {}) => apiClient.put(`/exhibits/${exhibitId}`, data, { params }),
+    delete: (exhibitId, params = {}) => apiClient.delete(`/exhibits/${exhibitId}`, { params }),
+    createBatch: (data, params = {}) => apiClient.post('/exhibits/batch', data, { params }),
+    deleteAll: (params = {}) => apiClient.delete('/exhibits/all', { params }),
   },
   
   ai: {

@@ -52,9 +52,10 @@ SUPABASE_URL=你的Supabase项目URL
 SUPABASE_KEY=你的Supabase服务密钥
 SUPABASE_ANON_KEY=你的Supabase匿名密钥
 
-# 元景AI配置
-YUANJING_API_KEY=你的元景API密钥
-YUANJING_BASE_URL=https://api.yuanjing.ai
+# DeepSeek AI 配置
+DEEPSEEK_API_KEY=你的DeepSeek API密钥
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
 
 # 应用配置
 DEBUG=true

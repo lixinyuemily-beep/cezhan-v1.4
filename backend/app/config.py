@@ -2,22 +2,34 @@
 配置文件 - 管理所有环境变量和配置
 """
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(BACKEND_ROOT / ".env")
 
 
 class Settings(BaseSettings):
     # Supabase 配置 (使用 service role key，服务端安全连接)
     supabase_url: str = os.getenv("SUPABASE_URL", "")
     supabase_key: str = os.getenv("SUPABASE_KEY", "")
+    supabase_storage_bucket: str = os.getenv("SUPABASE_STORAGE_BUCKET", "exhibit-imports")
+    supabase_storage_import_prefix: str = os.getenv("SUPABASE_STORAGE_IMPORT_PREFIX", "imports")
+    supabase_storage_public: bool = os.getenv("SUPABASE_STORAGE_PUBLIC", "true").lower() == "true"
 
-    # 元景AI配置 (使用 OPENAI 兼容模式)
-    yuanjing_api_key: str = os.getenv("YUANJING_API_KEY", "")
-    yuanjing_base_url: str = os.getenv("YUANJING_BASE_URL", "https://maas-api.ai-yuanjing.com/openapi/compatible-mode/v1")
+    # DeepSeek AI 配置 (OpenAI 兼容接口)
+    deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+    deepseek_base_url: str = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
     # FastAPI配置
     app_name: str = "策展智能助手 API"
     debug: bool = os.getenv("DEBUG", "true").lower() == "true"
     cors_origins: list = ["http://localhost:5173", "http://localhost:5174"]
+    app_public_base_url: str = os.getenv("APP_PUBLIC_BASE_URL", "http://localhost:8000")
 
     # 自建认证配置
     auth_token_secret: str = os.getenv("AUTH_TOKEN_SECRET", "change-me-in-production")
@@ -46,6 +58,18 @@ class Settings(BaseSettings):
     table_completed_projects: str = "completed_projects"
     table_app_users: str = "app_users"
     table_email_verification_codes: str = "email_verification_codes"
+
+    # 展品导入配置
+    exhibit_import_max_upload_size_mb: int = int(os.getenv("EXHIBIT_IMPORT_MAX_UPLOAD_SIZE_MB", "360"))
+    exhibit_import_task_concurrency: int = int(os.getenv("EXHIBIT_IMPORT_TASK_CONCURRENCY", "1"))
+    exhibit_import_temp_dir: str = os.getenv(
+        "EXHIBIT_IMPORT_TEMP_DIR",
+        str(BACKEND_ROOT / "storage" / "import_jobs"),
+    )
+    exhibit_import_static_dir: str = os.getenv(
+        "EXHIBIT_IMPORT_STATIC_DIR",
+        str(BACKEND_ROOT / "storage" / "import_assets"),
+    )
 
     class Config:
         env_file = ".env"

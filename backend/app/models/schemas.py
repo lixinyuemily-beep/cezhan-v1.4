@@ -118,12 +118,20 @@ class UnitResponse(UnitBase):
 
 class ExhibitBase(BaseModel):
     """展品基础模型"""
+    user_id: Optional[str] = Field(None, description="用户ID")
     project_id: Optional[str] = Field(None, description="项目ID")
     unit_id: Optional[str] = Field(None, description="单元ID")
     name: str = Field(..., description="展品名称")
-    era: Optional[str] = Field(None, description="年代")
+    time: Optional[str] = Field(None, description="时间")
+    place: Optional[str] = Field(None, description="地点")
     material: Optional[str] = Field(None, description="材质")
-    size: Optional[str] = Field(None, description="尺寸")
+    introduction: Optional[str] = Field(None, description="介绍")
+    image_url: Optional[str] = Field(None, description="图片")
+    thumbnail_url: Optional[str] = Field(None, description="缩略图")
+    storage_bucket: Optional[str] = Field(None, description="图片所在存储桶")
+    storage_path: Optional[str] = Field(None, description="图片存储路径")
+    thumbnail_storage_path: Optional[str] = Field(None, description="缩略图存储路径")
+    other: Optional[str] = Field(None, description="其他信息")
     weight: Optional[int] = Field(None, description="推荐权重")
     source: Optional[str] = Field(None, description="来源")
     confidence: Optional[int] = Field(None, description="置信度")
@@ -139,9 +147,16 @@ class ExhibitCreate(ExhibitBase):
 class ExhibitUpdate(BaseModel):
     """更新展品请求"""
     name: Optional[str] = None
-    era: Optional[str] = None
+    time: Optional[str] = None
+    place: Optional[str] = None
     material: Optional[str] = None
-    size: Optional[str] = None
+    introduction: Optional[str] = None
+    image_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    storage_bucket: Optional[str] = None
+    storage_path: Optional[str] = None
+    thumbnail_storage_path: Optional[str] = None
+    other: Optional[str] = None
     weight: Optional[int] = None
     source: Optional[str] = None
     confidence: Optional[int] = None
@@ -228,6 +243,7 @@ class RecommendRequest(BaseModel):
     exhibit_pool: List[Dict[str, Any]] = Field(..., description="展品池")
     unit_theme: str = Field(..., description="单元主题")
     unit_description: str = Field(..., description="单元描述")
+    min_count: int = Field(5, description="建议最少推荐数量")
     max_count: int = Field(10, description="最大推荐数量")
 
 

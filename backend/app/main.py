@@ -1,8 +1,12 @@
 """
 FastAPI 主入口 - 策展智能助手 API
 """
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
 from .config import settings
 from .routers import projects, exhibits, ai, auth
 
@@ -22,6 +26,13 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+Path(settings.exhibit_import_static_dir).mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/static/imports",
+    StaticFiles(directory=settings.exhibit_import_static_dir),
+    name="import-assets",
 )
 
 # 注册路由
@@ -48,7 +59,8 @@ async def health_check():
     return {
         "status": "healthy",
         "database": "supabase",
-        "ai": "yuanjing",
+        "ai": "deepseek",
+        "model": settings.deepseek_model,
         "supabase_url": settings.supabase_url
     }
 

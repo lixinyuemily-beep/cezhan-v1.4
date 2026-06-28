@@ -1,8 +1,18 @@
-import React, { useState, useRef, useEffect } from 'react';
-import * as XLSX from 'xlsx';
-import { Btn, Divider } from '../components/ui';
+import { useState, useRef, useEffect } from 'react';
+import { Btn } from '../components/ui';
 import { generateCurationOutline } from '../api/curationApi';
 import { api } from '../api/client';
+import {
+  EXHIBIT_TEMPLATE_HEADERS,
+  getExhibitImage,
+  getExhibitMaterial,
+  getExhibitName,
+  getExhibitOther,
+  getExhibitPlace,
+  getExhibitTime,
+  hasMeaningfulExhibitData,
+  normalizeImportedExhibit,
+} from '../utils/exhibitFields';
 
 const RHYTHM_STAGE_LABELS = ['开场', '铺垫', '转折', '深入', '高潮', '余韵'];
 const RHYTHM_PRESETS = [
@@ -19,6 +29,7 @@ const RHYTHM_PADDING_Y = 18;
 const RHYTHM_BASELINE = 50;
 const UNIT_COUNT_MIN = 2;
 const ITEMS_PER_UNIT_MIN = 2;
+const ITEMS_PER_UNIT_FALLBACK_LIMIT = 50;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const getSliderFillPercentage = (value, min, max) => (max <= min ? 100 : ((value - min) / (max - min)) * 100);
@@ -397,12 +408,10 @@ function RhythmDesigner({ C, value, onChange }) {
   );
 }
 
-export const PageP1 = ({ 
+export const PageP1 = ({
   navigateTo,
   setUploaded,
-  setShowAdvanced,
   uploaded,
-  showAdvanced,
   createNewProject,
   setCurrentProject,
   exhibitTitle,
@@ -427,56 +436,142 @@ export const PageP1 = ({
   narrativeRhythm,
   setNarrativeRhythm,
   showToast,
+  activeUserId,
+  isLoggedIn,
+  requireLogin,
   theme,
 }) => {
   const C = theme;
   const fileInputRef = useRef(null);
+  const dragCounterRef = useRef(0);
   const [isParsing, setIsParsing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [serverProgress, setServerProgress] = useState(0);
+  const [parseStage, setParseStage] = useState('idle');
+  const [parseTaskId, setParseTaskId] = useState('');
+  const [parseStatusText, setParseStatusText] = useState('');
+  const [parseMeta, setParseMeta] = useState(null);
   const [parseError, setParseError] = useState(null);
+  const [librarySaveSummary, setLibrarySaveSummary] = useState(null);
   const [knowledgeExhibits, setKnowledgeExhibits] = useState([]);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [knowledgeSearch, setKnowledgeSearch] = useState('');
   const [selectedFromKnowledge, setSelectedFromKnowledge] = useState([]);
-  const [advancedCardAnchorHeight, setAdvancedCardAnchorHeight] = useState(0);
   const unitCountMax = Math.max(UNIT_COUNT_MIN, Number(advancedSettings.unitCountMax ?? 6));
-  const itemsPerUnitMax = Math.max(ITEMS_PER_UNIT_MIN, Number(advancedSettings.itemsPerUnitMax ?? 20));
-  const advancedCardRef = useRef(null);
+  const itemsPerUnitLimit = Math.max(
+    ITEMS_PER_UNIT_MIN,
+    uploadedExhibits.length || selectedFromKnowledge.length || ITEMS_PER_UNIT_FALLBACK_LIMIT
+  );
+  const itemsPerUnitMin = Math.max(ITEMS_PER_UNIT_MIN, Number(advancedSettings.itemsPerUnitMin ?? 5));
+  const itemsPerUnitMax = clamp(Number(advancedSettings.itemsPerUnitMax ?? advancedSettings.itemsPerUnit ?? 10), itemsPerUnitMin, itemsPerUnitLimit);
+  const [itemsRangeDraft, setItemsRangeDraft] = useState({
+    min: String(itemsPerUnitMin),
+    max: String(itemsPerUnitMax),
+  });
 
   useEffect(() => {
     const loadKnowledgeExhibits = async () => {
+      if (!isLoggedIn || !activeUserId) {
+        setKnowledgeExhibits([]);
+        return;
+      }
       try {
-        const exhibits = await api.exhibits.getAll();
+        const exhibits = await api.exhibits.getAll({ user_id: activeUserId });
         setKnowledgeExhibits(exhibits);
       } catch (error) {
         console.error('加载知识库展品失败:', error);
       }
     };
     loadKnowledgeExhibits();
-  }, []);
+  }, [activeUserId, isLoggedIn]);
 
   useEffect(() => {
-    if (showAdvanced && advancedCardRef.current) {
-      setAdvancedCardAnchorHeight(advancedCardRef.current.offsetHeight);
-    }
-  }, [showAdvanced, advancedSettings]);
+    setItemsRangeDraft({
+      min: String(itemsPerUnitMin),
+      max: String(itemsPerUnitMax),
+    });
+  }, [itemsPerUnitMin, itemsPerUnitMax]);
+
+  useEffect(() => {
+    setAdvancedSettings(prev => {
+      const nextMin = clamp(Number(prev.itemsPerUnitMin ?? 5), ITEMS_PER_UNIT_MIN, itemsPerUnitLimit);
+      const nextMax = clamp(Number(prev.itemsPerUnitMax ?? prev.itemsPerUnit ?? 10), nextMin, itemsPerUnitLimit);
+      if (nextMin === prev.itemsPerUnitMin && nextMax === prev.itemsPerUnitMax && nextMax === prev.itemsPerUnit) {
+        return prev;
+      }
+      return {
+        ...prev,
+        itemsPerUnitMin: nextMin,
+        itemsPerUnitMax: nextMax,
+        itemsPerUnit: nextMax,
+      };
+    });
+  }, [itemsPerUnitLimit, setAdvancedSettings]);
 
   const filteredKnowledgeExhibits = knowledgeSearch
-    ? knowledgeExhibits.filter(ex => 
-        (ex.name && ex.name.includes(knowledgeSearch)) || 
-        (ex.era && ex.era.includes(knowledgeSearch))
+    ? knowledgeExhibits.filter(ex =>
+        getExhibitName(ex).includes(knowledgeSearch) ||
+        getExhibitTime(ex).includes(knowledgeSearch) ||
+        getExhibitPlace(ex).includes(knowledgeSearch) ||
+        getExhibitMaterial(ex).includes(knowledgeSearch)
       )
     : knowledgeExhibits;
 
+  const parseProgressValue = parseStage === 'uploading' ? uploadProgress : serverProgress;
+  const parseHeadline = parseStage === 'uploading'
+    ? '正在上传文件...'
+    : parseStage === 'queued'
+      ? '解析任务已创建...'
+      : parseStage === 'success'
+        ? '文件解析完成'
+        : '服务端正在解析文件...';
+
+  const handleItemsRangeDraftChange = (key, value) => {
+    if (!/^\d*$/.test(value)) return;
+    setItemsRangeDraft(prev => ({ ...prev, [key]: value }));
+  };
+
+  const commitItemsRangeDraft = (key) => {
+    const rawValue = itemsRangeDraft[key];
+    if (rawValue === '') {
+      setItemsRangeDraft({
+        min: String(itemsPerUnitMin),
+        max: String(itemsPerUnitMax),
+      });
+      return;
+    }
+    const nextValue = parseInt(rawValue, 10);
+    if (Number.isNaN(nextValue)) return;
+    handleAdvancedChange(key === 'min' ? 'itemsPerUnitMin' : 'itemsPerUnitMax', nextValue);
+  };
+
+  const handleItemsRangeKeyDown = (event, key) => {
+    if (event.key === 'Enter') {
+      commitItemsRangeDraft(key);
+      event.currentTarget.blur();
+    }
+  };
+
   const handleSelectFromKnowledge = (exhibit) => {
+    if (!isLoggedIn) {
+      requireLogin('从展品库选择展品');
+      return;
+    }
+    const normalizedExhibit = normalizeImportedExhibit(exhibit);
     if (!selectedFromKnowledge.find(e => e.id === exhibit.id)) {
       setSelectedFromKnowledge([...selectedFromKnowledge, exhibit]);
-      setUploadedExhibits([...uploadedExhibits, exhibit]);
+      setUploadedExhibits([...uploadedExhibits, normalizedExhibit]);
       setUploaded(true);
     }
   };
 
   const handleRemoveFromKnowledge = (exhibitId) => {
+    if (!isLoggedIn) {
+      requireLogin('编辑展品清单');
+      return;
+    }
     setSelectedFromKnowledge(selectedFromKnowledge.filter(e => e.id !== exhibitId));
     setUploadedExhibits(uploadedExhibits.filter(e => e.id !== exhibitId));
     if (uploadedExhibits.length <= 1) {
@@ -484,138 +579,198 @@ export const PageP1 = ({
     }
   };
 
-  const parseExcelFile = (file) => {
-    return new Promise((resolve, reject) => {
-      const isCSV = file.name.toLowerCase().endsWith('.csv');
-      
-      if (isCSV) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          try {
-            const text = e.target.result;
-            const workbook = XLSX.read(text, { type: 'string' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-            
-            if (jsonData.length < 2) {
-              reject(new Error('文件内容为空或格式不正确'));
-              return;
-            }
-            
-            const headers = jsonData[0];
-            const rows = jsonData.slice(1).filter(row => row.some(cell => cell !== null && cell !== ''));
-            
-            const exhibits = rows.map((row, index) => {
-              const obj = {};
-              headers.forEach((header, i) => {
-                obj[header] = row[i];
-              });
-              obj._rowIndex = index;
-              return obj;
-            });
-            
-            resolve({ headers, exhibits, total: exhibits.length });
-          } catch (err) {
-            reject(err);
-          }
-        };
-        reader.onerror = () => reject(new Error('文件读取失败'));
-        reader.readAsText(file, 'utf-8');
-        return;
-      }
-      
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const data = new Uint8Array(e.target.result);
-          const workbook = XLSX.read(data, { type: 'array' });
-          
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-          
-          if (jsonData.length < 2) {
-            reject(new Error('文件内容为空或格式不正确'));
-            return;
-          }
-          
-          const headers = jsonData[0];
-          const rows = jsonData.slice(1).filter(row => row.some(cell => cell !== null && cell !== ''));
-          
-          const exhibits = rows.map((row, index) => {
-            const obj = {};
-            headers.forEach((header, i) => {
-              obj[header] = row[i];
-            });
-            obj._rowIndex = index;
-            return obj;
-          });
-          
-          resolve({ headers, exhibits, total: exhibits.length });
-        } catch (err) {
-          reject(err);
-        }
-      };
-      
-      reader.onerror = () => reject(new Error('文件读取失败'));
-      reader.readAsArrayBuffer(file);
-    });
-  };
-
-  const handleFileSelect = async (event) => {
-    const file = event.target.files?.[0];
+  const processSelectedFile = async (file) => {
+    if (!isLoggedIn || !activeUserId) {
+      requireLogin('上传展品模板');
+      return;
+    }
     if (!file) return;
 
-    const validExtensions = ['.xlsx', '.xls', '.csv'];
+    const validExtensions = ['.xlsx', '.csv'];
     const fileName = file.name.toLowerCase();
     const isValid = validExtensions.some(ext => fileName.endsWith(ext));
-    
+
     if (!isValid) {
-      setParseError('请上传 Excel (.xlsx, .xls) 或 CSV 格式的文件');
+      setParseError(`请上传固定模板的 Excel (.xlsx) 或 CSV 文件，表头必须为：${EXHIBIT_TEMPLATE_HEADERS.join('、')}`);
       return;
     }
 
     setIsParsing(true);
     setParseError(null);
+    setUploadProgress(0);
+    setServerProgress(0);
+    setParseStage('uploading');
+    setParseTaskId('');
+    setParseStatusText('文件正在上传到服务端。');
+    setParseMeta(null);
+    setLibrarySaveSummary(null);
 
     try {
-      const result = await parseExcelFile(file);
-      
+      const result = await api.exhibits.parseTemplate(file, {
+        userId: activeUserId,
+        onUploadProgress: (progressEvent) => {
+          const total = Number(progressEvent.total || file.size || 0);
+          const loaded = Number(progressEvent.loaded || 0);
+          if (total > 0) {
+            const nextProgress = Math.min(100, Math.round((loaded / total) * 100));
+            setUploadProgress(nextProgress);
+            if (nextProgress >= 100) {
+              setParseStage('queued');
+              setParseStatusText('文件上传完成，正在创建解析任务。');
+            }
+          }
+        },
+        onTaskProgress: (task) => {
+          setParseTaskId(task.task_id || '');
+          setParseMeta(task.meta || null);
+          setServerProgress(Number(task.progress || 0));
+          setParseStage(task.stage || 'parsing');
+          setParseStatusText(task.message || '服务端正在解析文件。');
+        },
+      });
+
+      const parsedExhibits = (result.exhibits || [])
+        .map(normalizeImportedExhibit)
+        .filter(hasMeaningfulExhibitData);
+      let exhibitsForFlow = parsedExhibits;
+
+      if (parsedExhibits.length > 0) {
+        try {
+          const created = await api.exhibits.createBatch(
+            parsedExhibits.map(({ name, time, place, material, introduction, image_url, thumbnail_url, storage_bucket, storage_path, thumbnail_storage_path, other }) => ({
+              name: name || '',
+              time,
+              place,
+              material,
+              introduction,
+              image_url,
+              thumbnail_url: thumbnail_url || image_url,
+              storage_bucket,
+              storage_path,
+              thumbnail_storage_path,
+              other,
+            })),
+            { user_id: activeUserId }
+          );
+          const savedExhibits = (created || []).map(normalizeImportedExhibit);
+          exhibitsForFlow = savedExhibits.length > 0 ? savedExhibits : parsedExhibits;
+          setKnowledgeExhibits((prev) => [...savedExhibits, ...prev]);
+          setLibrarySaveSummary({
+            status: 'success',
+            count: savedExhibits.length,
+            message: `已同步 ${savedExhibits.length} 件展品到展品库`,
+          });
+        } catch (saveError) {
+          console.error('同步展品库失败:', saveError);
+          setLibrarySaveSummary({
+            status: 'error',
+            count: 0,
+            message: saveError.message || '展品已解析，但同步到展品库失败',
+          });
+          showToast?.('展品已解析，但同步到展品库失败，请稍后在展品库中重新导入', 'error');
+        }
+      }
+
       setUploadedFile(file);
-      setUploadedExhibits(result.exhibits);
+      setUploadedExhibits(exhibitsForFlow);
+      setParseMeta(result.meta || null);
+      setUploadProgress(100);
+      setServerProgress(100);
+      setParseStage('success');
+      setParseStatusText('模板校验、表格解析、图片处理和展品库同步已完成。');
       setUploaded(true);
     } catch (err) {
       setParseError(err.message || '文件解析失败');
+      setParseStage('error');
+      setParseStatusText('');
       setUploaded(false);
       setUploadedFile(null);
       setUploadedExhibits([]);
+      setLibrarySaveSummary(null);
     } finally {
       setIsParsing(false);
     }
   };
 
+  const handleFileSelect = async (event) => {
+    const file = event.target.files?.[0];
+    await processSelectedFile(file);
+  };
+
+  const handleDragEnter = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragCounterRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragOver = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = 'copy';
+    setIsDragActive(true);
+  };
+
+  const handleDragLeave = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDrop = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDragActive(false);
+
+    if (isParsing) return;
+    if (!isLoggedIn) {
+      requireLogin('上传展品模板');
+      return;
+    }
+
+    const file = event.dataTransfer?.files?.[0];
+    await processSelectedFile(file);
+  };
+
   const handleReupload = () => {
+    if (!isLoggedIn) {
+      requireLogin('重新上传展品模板');
+      return;
+    }
     setUploaded(false);
     setUploadedFile(null);
     setUploadedExhibits([]);
+    setUploadProgress(0);
+    setServerProgress(0);
+    setParseStage('idle');
+    setParseTaskId('');
+    setParseStatusText('');
+    setParseMeta(null);
     setParseError(null);
+    setLibrarySaveSummary(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
   const handleStartGeneration = async () => {
+    if (!isLoggedIn || !activeUserId) {
+      requireLogin('生成并编辑策展方案');
+      return;
+    }
     if (!uploaded || !uploadedExhibits.length) return;
 
     setIsGenerating(true);
-    
+
     try {
       const llmParams = buildLLMParams();
-      
+
       const result = await generateCurationOutline(llmParams);
-      
+
       if (result.success) {
         await saveAIGeneratedData(null, result, llmParams);
         showToast('策展大纲生成成功！请选择叙事方向', 'success');
@@ -635,64 +790,120 @@ export const PageP1 = ({
     setAdvancedSettings(prev => {
       const next = { ...prev, [key]: value };
       const nextUnitCountMax = Math.max(UNIT_COUNT_MIN, Number(next.unitCountMax ?? 6));
-      const nextItemsPerUnitMax = Math.max(ITEMS_PER_UNIT_MIN, Number(next.itemsPerUnitMax ?? 20));
+      let nextItemsPerUnitMin = Math.max(ITEMS_PER_UNIT_MIN, Number(next.itemsPerUnitMin ?? 5));
+      let nextItemsPerUnitMax = clamp(Number(next.itemsPerUnitMax ?? next.itemsPerUnit ?? 10), ITEMS_PER_UNIT_MIN, itemsPerUnitLimit);
+      if (nextItemsPerUnitMin > nextItemsPerUnitMax) {
+        if (key === 'itemsPerUnitMin') {
+          nextItemsPerUnitMax = nextItemsPerUnitMin;
+        } else {
+          nextItemsPerUnitMin = nextItemsPerUnitMax;
+        }
+      }
 
       return {
         ...next,
         unitCountMax: nextUnitCountMax,
+        itemsPerUnitMin: nextItemsPerUnitMin,
         itemsPerUnitMax: nextItemsPerUnitMax,
         unitCount: clamp(Number(next.unitCount ?? 3), UNIT_COUNT_MIN, nextUnitCountMax),
-        itemsPerUnit: clamp(Number(next.itemsPerUnit ?? 10), ITEMS_PER_UNIT_MIN, nextItemsPerUnitMax),
+        itemsPerUnit: nextItemsPerUnitMax,
         temperature: clamp(Number(next.temperature ?? 0.9), 0.1, 1.0),
       };
     });
   };
 
   return (
-    <main style={{ padding: "28px 36px", maxWidth: 1200 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, color: C.textPrimary, fontFamily: "'Noto Serif SC', serif" }}>
-        开始新策展
-      </h1>
-      <p style={{ color: C.textSecondary, fontSize: 14, marginTop: 6, marginBottom: 24 }}>
-        告诉我们这次展览的基本信息，AI 将据此生成策展大纲
-      </p>
-      <Divider />
+    <main style={{ padding: "32px 36px 40px", maxWidth: 1280 }}>
+      <section style={{
+        padding: "24px 28px",
+        borderRadius: 22,
+        border: `1px solid ${C.border}`,
+        background: `linear-gradient(135deg, ${C.bgElevated || C.bgSecondary} 0%, ${C.bgMuted || C.bgPrimary} 100%)`,
+        boxShadow: C.shadowSm,
+        marginBottom: 24,
+      }}>
+        <div style={{ fontSize: 11, color: C.accentSecondary, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 8 }}>
+          NEW CURATION BRIEF
+        </div>
+        <h1 style={{ fontSize: 28, fontWeight: 700, color: C.textPrimary, margin: 0, fontFamily: "var(--font-serif)" }}>
+          开始新策展
+        </h1>
+        <p style={{ color: C.textSecondary, fontSize: 14, marginTop: 10, marginBottom: 0, lineHeight: 1.7, maxWidth: 700 }}>
+          先确定展览题目、展品清单和策展意图，再通过生成参数与叙事节奏完成整场展览的策略设定。
+        </p>
+      </section>
+
+      {!isLoggedIn && (
+        <div style={{
+          marginBottom: 24,
+          padding: '14px 16px',
+          borderRadius: 14,
+          border: `1px solid ${C.border}`,
+          background: C.bgSecondary,
+          color: C.textSecondary,
+          fontSize: 13,
+          lineHeight: 1.7,
+        }}>
+          当前为访客预览模式。你可以查看新建策展界面与参数配置，但不会加载任何个人项目或展品数据；上传、生成与保存前请先登录。
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 40, marginTop: 24, alignItems: "stretch" }}>
-        <div style={{ flex: 3, display: "flex", flexDirection: "column" }}>
-          <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+        <div style={{ flex: 3, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginBottom: 8, color: C.textPrimary }}>
             展览题目（可选）
           </label>
-          <input 
+          <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 8 }}>
+            若留空，系统会根据展品内容自动生成主标题。
+          </div>
+          <input
             placeholder="留空则由 AI 根据展品内容自动生成题目"
             value={exhibitTitle}
             onChange={(e) => setExhibitTitle(e.target.value)}
             style={{
-              width: "100%", padding: "10px 14px", borderRadius: 6,
-              border: `1px solid ${C.border}`, fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif",
-              outline: "none", boxSizing: "border-box", background: "#fff",
-            }} 
+              width: "100%", padding: "12px 14px", borderRadius: 12,
+              border: `1px solid ${C.border}`, fontSize: 14, fontFamily: "var(--font-ui)",
+              outline: "none", boxSizing: "border-box", background: C.bgElevated || "#fff", color: C.textPrimary,
+              boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.03)",
+            }}
           />
 
-          <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginTop: 20, marginBottom: 8 }}>
+          <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginTop: 22, marginBottom: 8, color: C.textPrimary }}>
             展品清单上传（必填）
           </label>
-          
+          <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 8 }}>
+            仅支持固定模板：{EXHIBIT_TEMPLATE_HEADERS.join('、')}。模板不匹配会直接报错；`.xlsx` 中可解析图片列与嵌入图片，当前支持异步解析最高 360MB。
+          </div>
+
           <input
             ref={fileInputRef}
             type="file"
-            accept=".xlsx,.xls,.csv"
+            accept=".xlsx,.csv"
             onChange={handleFileSelect}
             style={{ display: 'none' }}
           />
-          
+
           {!uploaded ? (
             <div
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => {
+                if (!isLoggedIn) {
+                  requireLogin('上传展品模板');
+                  return;
+                }
+                fileInputRef.current?.click();
+              }}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
               style={{
-                border: `2px dashed ${C.border}`, borderRadius: 8, padding: "40px 20px",
-                textAlign: "center", cursor: "pointer", background: "#fafaf9",
-                transition: "border-color 0.2s",
+                minHeight: 388,
+                border: `2px dashed ${isDragActive ? C.accentPrimary : C.border}`, borderRadius: 18, padding: "40px 24px",
+                textAlign: "center", cursor: "pointer", background: `linear-gradient(180deg, ${C.bgElevated || "#fff"} 0%, ${C.bgMuted || "#fafaf9"} 100%)`,
+                display: "flex", flexDirection: "column", justifyContent: "center",
+                transition: "border-color 0.2s, transform 0.2s, box-shadow 0.2s",
+                boxShadow: isDragActive ? `0 0 0 4px ${C.accentPrimary}18` : C.shadowSm,
+                transform: isDragActive ? "scale(1.01)" : "scale(1)",
               }}
             >
               {isParsing ? (
@@ -702,45 +913,122 @@ export const PageP1 = ({
                       <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
                     </svg>
                   </div>
-                  <div style={{ fontWeight: 600, color: C.textPrimary, marginBottom: 4 }}>
-                    正在解析文件...
+                  <div style={{ fontWeight: 600, color: C.textPrimary, marginBottom: 6, fontSize: 18 }}>
+                    {parseHeadline}
+                  </div>
+                  <div style={{ fontSize: 13, color: C.textSecondary, marginBottom: 14 }}>
+                    {parseStage === 'uploading'
+                      ? `文件正在上传到服务端，当前进度 ${uploadProgress}%`
+                      : `${parseStatusText || '文件已上传，服务端正在校验固定模板、读取表格并处理图片。'} 当前进度 ${serverProgress}%`}
+                  </div>
+                  <div style={{
+                    width: '100%',
+                    maxWidth: 360,
+                    height: 10,
+                    margin: '0 auto',
+                    background: C.bgPrimary,
+                    borderRadius: 999,
+                    overflow: 'hidden',
+                    border: `1px solid ${C.border}`,
+                  }}>
+                    <div style={{
+                      width: `${parseProgressValue}%`,
+                      height: '100%',
+                      background: `linear-gradient(90deg, ${C.accentPrimary} 0%, ${C.accentSecondary} 100%)`,
+                      transition: 'width .2s ease',
+                    }} />
+                  </div>
+                  <div style={{ marginTop: 12, fontSize: 12, color: C.textSecondary, lineHeight: 1.7 }}>
+                    {parseStage === 'uploading'
+                      ? '上传完成后会自动进入后台解析，无需重复操作。'
+                      : `文件已切换到后台异步解析；即使图片较多也不会占住单次请求。${parseTaskId ? ` 任务 ID：${parseTaskId}` : ''}`}
                   </div>
                 </>
               ) : (
                 <>
-                  <div style={{ fontSize: 32, marginBottom: 8, color: C.textSecondary }}>
+                  <div style={{ fontSize: 32, marginBottom: 10, color: C.textSecondary }}>
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
                     </svg>
                   </div>
-                  <div style={{ fontWeight: 600, color: C.textPrimary, marginBottom: 4 }}>
-                    拖拽文件到此或点击选择
+                  <div style={{ fontWeight: 700, color: C.textPrimary, marginBottom: 6, fontSize: 18 }}>
+                    {isDragActive ? '松开以上传文件' : '拖拽文件到此或点击选择'}
                   </div>
-                  <div style={{ color: C.textSecondary, fontSize: 13 }}>支持 Excel (.xlsx, .xls) 或 CSV 格式</div>
+                  <div style={{ color: C.textSecondary, fontSize: 13, lineHeight: 1.7 }}>
+                    支持固定模板 Excel (`.xlsx`) 或 CSV
+                  </div>
                   <div style={{ marginTop: 12 }}>
-                    <Btn small variant="ghost" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>选择文件</Btn>
+                    <Btn small variant="ghost" onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isLoggedIn) {
+                        requireLogin('上传展品模板');
+                        return;
+                      }
+                      fileInputRef.current?.click();
+                    }}>{isLoggedIn ? '选择文件' : '登录后上传'}</Btn>
                   </div>
                 </>
               )}
             </div>
           ) : (
             <div style={{
-              background: "#F0FDF4", border: `1px solid ${C.success}`, borderRadius: 8, padding: "16px 20px",
+              minHeight: 220,
+              background: `${C.success}10`, border: `1px solid ${C.success}44`, borderRadius: 18, padding: "20px 22px",
+              display: "flex", flexDirection: "column", justifyContent: "center",
+              boxShadow: C.shadowSm,
             }}>
-              <div style={{ fontWeight: 700, color: C.success, fontSize: 14, marginBottom: 8 }}>
+              <div style={{ fontWeight: 700, color: C.success, fontSize: 15, marginBottom: 10 }}>
                 ✓ 已上传：{uploadedExhibits.length} 件展品
               </div>
               <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 4 }}>
                 文件名：{uploadedFile?.name}
               </div>
+            {parseMeta && (
+              <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 4 }}>
+                解析结果：成功导入 {Number(parseMeta.imported_count || uploadedExhibits.length || 0)} 条，文件大小 {(Number(parseMeta.file_size || 0) / 1024 / 1024).toFixed(2)} MB
+                {Number(parseMeta.embedded_image_count || 0) > 0 ? `，处理嵌入图片 ${parseMeta.embedded_image_count} 张` : ''}
+                {Number(parseMeta.skipped_blank_rows || 0) > 0 ? `，跳过空白行 ${parseMeta.skipped_blank_rows} 行` : ''}
+                {Number(parseMeta.incomplete_row_count || 0) > 0 ? `，信息不全 ${parseMeta.incomplete_row_count} 行` : ''}
+              </div>
+            )}
+            {librarySaveSummary && (
+              <div style={{
+                fontSize: 12,
+                color: librarySaveSummary.status === 'success' ? C.success : C.danger,
+                marginBottom: 4,
+                fontWeight: 700,
+              }}>
+                展品库同步：{librarySaveSummary.message}
+              </div>
+            )}
+            {Number(parseMeta?.incomplete_row_count || 0) > 0 && (
+              <div style={{
+                marginTop: 8,
+                padding: '10px 12px',
+                borderRadius: 10,
+                background: `${C.warning}10`,
+                border: `1px solid ${C.warning}33`,
+                color: C.textSecondary,
+                fontSize: 12,
+                lineHeight: 1.7,
+              }}>
+                以下行信息不全，但已保留可解析内容：
+                {(parseMeta.incomplete_rows || []).slice(0, 5).map((item) => (
+                  <div key={item.row_number}>
+                    第 {item.row_number} 行：缺少 {item.missing_fields.join('、')}
+                  </div>
+                ))}
+                {Number(parseMeta.incomplete_row_count || 0) > 5 ? `其余 ${Number(parseMeta.incomplete_row_count || 0) - 5} 行请在展品库中继续检查。` : ''}
+              </div>
+            )}
               <div style={{ marginTop: 8, display: "flex", gap: 12 }}>
-                <span 
+                <span
                   style={{ color: C.accentPrimary, cursor: "pointer", fontSize: 13 }}
                   onClick={() => setShowPreviewModal(true)}
                 >
                   [查看清单]
                 </span>
-                <span 
+                <span
                   style={{ color: C.accentPrimary, cursor: "pointer", fontSize: 13 }}
                   onClick={handleReupload}
                 >
@@ -752,8 +1040,8 @@ export const PageP1 = ({
 
           {parseError && (
             <div style={{
-              marginTop: 8, padding: "10px 14px", background: "#FEF2F2",
-              border: `1px solid ${C.danger}`, borderRadius: 6, fontSize: 13, color: C.danger,
+              marginTop: 10, padding: "12px 14px", background: `${C.danger}10`,
+              border: `1px solid ${C.danger}44`, borderRadius: 12, fontSize: 13, color: C.danger,
             }}>
               ⚠️ {parseError}
             </div>
@@ -763,32 +1051,24 @@ export const PageP1 = ({
             style={{
               marginTop: "auto",
               paddingTop: 16,
-              minHeight: !showAdvanced && advancedCardAnchorHeight ? advancedCardAnchorHeight : undefined,
             }}
           >
             <div
-              ref={advancedCardRef}
               style={{
-              background: C.bgSecondary,
+              background: C.bgElevated || C.bgSecondary,
               border: `1px solid ${C.border}`,
-              borderRadius: 12,
-              boxShadow: `0 8px 20px ${C.accentPrimary}10`,
+              borderRadius: 18,
+              boxShadow: C.shadowSm,
               overflow: "hidden",
             }}
             >
               <div
-                onClick={() => setShowAdvanced(!showAdvanced)}
                 style={{
-                  padding: "14px 16px",
-                  background: C.bgSecondary,
-                  cursor: "pointer",
+                  padding: "16px 18px",
+                  background: C.bgElevated || C.bgSecondary,
                   display: "flex",
-                  justifyContent: "space-between",
                   alignItems: "center",
-                  transition: "all 0.2s ease",
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.background = C.hoverBg}
-                onMouseLeave={(e) => e.currentTarget.style.background = C.bgSecondary}
               >
                 <span style={{ fontSize: 13, color: C.textPrimary, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -796,193 +1076,204 @@ export const PageP1 = ({
                   </svg>
                   生成参数（高级设置）
                 </span>
-                <span style={{ 
-                  color: C.textSecondary,
-                  transition: "transform 0.2s ease",
-                  transform: showAdvanced ? "rotate(180deg)" : "rotate(0deg)"
-                }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="6 9 12 15 18 9"/>
-                  </svg>
-                </span>
               </div>
-              <div style={{ 
-                overflow: "hidden",
-                maxHeight: showAdvanced ? "560px" : "0",
-                opacity: showAdvanced ? 1 : 0,
-                transition: "all 0.3s ease",
-                borderTop: showAdvanced ? `1px solid ${C.border}` : "none",
-              }}>
-                <div style={{ padding: "16px" }}>
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <span style={{ fontSize: 13, color: C.textPrimary }}>展览单元数量</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ 
-                      fontSize: 14, fontWeight: 700, color: C.accentPrimary,
-                      background: C.accentPrimary + "15", padding: "2px 10px", borderRadius: 12
-                    }}>{advancedSettings.unitCount} 个</span>
-                    <label style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      padding: "4px 10px",
-                      borderRadius: 999,
-                      border: `1px solid ${C.accentPrimary}24`,
-                      background: `${C.accentPrimary}12`,
-                      color: C.accentPrimary,
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}>
-                      <span>上限</span>
-                      <input
-                        type="number"
-                        min={UNIT_COUNT_MIN}
-                        value={unitCountMax}
-                        onChange={(e) => handleAdvancedChange('unitCountMax', parseInt(e.target.value || `${UNIT_COUNT_MIN}`, 10))}
-                        style={{
-                          width: 32,
-                          padding: 0,
-                          border: "none",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          color: C.accentPrimary,
-                          background: "transparent",
-                          outline: "none",
-                          textAlign: "center",
-                          MozAppearance: "textfield",
-                        }}
-                      />
-                    </label>
+              <div style={{ borderTop: `1px solid ${C.border}` }}>
+                <div style={{ padding: "12px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "220px minmax(0, 1fr)", gap: 10, alignItems: "stretch" }}>
+                    <div style={{ padding: "12px", borderRadius: 14, border: `1px solid ${C.border}`, background: C.bgPrimary, height: "100%", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 13, color: C.textPrimary, fontWeight: 700 }}>展览单元数量</div>
+                          <div style={{ fontSize: 11, color: C.textSecondary, marginTop: 3 }}>控制正文单元规模</div>
+                        </div>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: C.accentPrimary, background: C.accentPrimary + "15", padding: "3px 10px", borderRadius: 12 }}>
+                          {advancedSettings.unitCount} 个
+                        </span>
+                      </div>
+                      <div>
+                        <input
+                          type="range"
+                          min={UNIT_COUNT_MIN}
+                          max={unitCountMax}
+                          value={advancedSettings.unitCount}
+                          onChange={(e) => handleAdvancedChange('unitCount', parseInt(e.target.value))}
+                          style={{
+                            width: "100%",
+                            accentColor: C.accentPrimary,
+                            cursor: "pointer",
+                            height: 6,
+                            borderRadius: 3,
+                            background: `linear-gradient(to right, ${C.accentPrimary} 0%, ${C.accentPrimary} ${getSliderFillPercentage(advancedSettings.unitCount, UNIT_COUNT_MIN, unitCountMax)}%, ${C.sliderTrack || C.border} ${getSliderFillPercentage(advancedSettings.unitCount, UNIT_COUNT_MIN, unitCountMax)}%, ${C.sliderTrack || C.border} 100%)`,
+                          }}
+                        />
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.textSecondary, marginTop: 4 }}>
+                          <span>{UNIT_COUNT_MIN}</span>
+                          <span>{unitCountMax}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ padding: "12px", borderRadius: 14, border: `1px solid ${C.border}`, background: C.bgPrimary, minWidth: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 13, color: C.textPrimary, fontWeight: 700 }}>每单元展品数</div>
+                          <div style={{ fontSize: 11, color: C.textSecondary, marginTop: 3 }}>
+                            AI 优先落在区间内
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: C.accentPrimary, background: C.accentPrimary + "15", padding: "3px 10px", borderRadius: 12 }}>
+                          {itemsPerUnitMin} - {itemsPerUnitMax} 件
+                        </span>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+                        {[
+                          { key: 'min', label: '最少', value: itemsRangeDraft.min, committed: itemsPerUnitMin, changeKey: 'itemsPerUnitMin', lower: ITEMS_PER_UNIT_MIN, upper: itemsPerUnitMax },
+                          { key: 'max', label: '最多', value: itemsRangeDraft.max, committed: itemsPerUnitMax, changeKey: 'itemsPerUnitMax', lower: itemsPerUnitMin, upper: itemsPerUnitLimit },
+                        ].map((field) => (
+                          <div
+                            key={field.key}
+                            style={{
+                              padding: "8px 10px",
+                              borderRadius: 12,
+                              border: `1px solid ${C.border}`,
+                              background: C.bgElevated || C.bgSecondary,
+                            }}
+                          >
+                            <div style={{ fontSize: 11, color: C.textSecondary, marginBottom: 6, fontWeight: 600 }}>{field.label}（件）</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "24px minmax(0, 1fr) 24px", gap: 4, alignItems: "center" }}>
+                              <button
+                                type="button"
+                                onClick={() => handleAdvancedChange(field.changeKey, field.committed - 1)}
+                                disabled={field.committed <= field.lower}
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: 7,
+                                  border: `1px solid ${C.border}`,
+                                  background: field.committed <= field.lower ? C.bgMuted || C.bgSecondary : C.bgPrimary,
+                                  color: C.textPrimary,
+                                  cursor: field.committed <= field.lower ? "not-allowed" : "pointer",
+                                  fontWeight: 700,
+                                  fontSize: 14,
+                                  lineHeight: 1,
+                                }}
+                              >
+                                -
+                              </button>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  minWidth: 0,
+                                  padding: "5px 8px",
+                                  borderRadius: 9,
+                                  border: `1px solid ${C.border}`,
+                                  background: C.bgPrimary,
+                                }}
+                              >
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  value={field.value}
+                                  onChange={(e) => handleItemsRangeDraftChange(field.key, e.target.value)}
+                                  onBlur={() => commitItemsRangeDraft(field.key)}
+                                  onKeyDown={(e) => handleItemsRangeKeyDown(e, field.key)}
+                                  placeholder={`${field.lower}`}
+                                  style={{
+                                    width: "100%",
+                                    minWidth: 0,
+                                    padding: 0,
+                                    border: "none",
+                                    background: "transparent",
+                                    color: C.textPrimary,
+                                    fontSize: 13,
+                                    fontWeight: 700,
+                                    textAlign: "center",
+                                    outline: "none",
+                                  }}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleAdvancedChange(field.changeKey, field.committed + 1)}
+                                disabled={field.committed >= field.upper}
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: 7,
+                                  border: `1px solid ${C.border}`,
+                                  background: field.committed >= field.upper ? C.bgMuted || C.bgSecondary : C.bgPrimary,
+                                  color: C.textPrimary,
+                                  cursor: field.committed >= field.upper ? "not-allowed" : "pointer",
+                                  fontWeight: 700,
+                                  fontSize: 14,
+                                  lineHeight: 1,
+                                }}
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginTop: 8, fontSize: 11, color: C.textSecondary }}>
+                        <span>可清空后重输，回车或离开输入框生效</span>
+                        <span>{uploadedExhibits.length > 0 ? `当前上限 ${itemsPerUnitLimit} 件` : '上传展品后按总数自动限制'}</span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <input 
-                  type="range" 
-                  min={UNIT_COUNT_MIN} 
-                  max={unitCountMax} 
-                  value={advancedSettings.unitCount}
-                  onChange={(e) => handleAdvancedChange('unitCount', parseInt(e.target.value))}
-                  style={{ 
-                    width: "100%", 
-                    accentColor: C.accentPrimary,
-                    cursor: "pointer",
-                    height: 6,
-                    borderRadius: 3,
-                    background: `linear-gradient(to right, ${C.accentPrimary} 0%, ${C.accentPrimary} ${getSliderFillPercentage(advancedSettings.unitCount, UNIT_COUNT_MIN, unitCountMax)}%, ${C.sliderTrack || C.border} ${getSliderFillPercentage(advancedSettings.unitCount, UNIT_COUNT_MIN, unitCountMax)}%, ${C.sliderTrack || C.border} 100%)`,
-                  }} 
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.textSecondary, marginTop: 4 }}>
-                  <span>{UNIT_COUNT_MIN}</span><span>{unitCountMax}</span>
-                </div>
-              </div>
-              
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <span style={{ fontSize: 13, color: C.textPrimary }}>每单元展品数</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ 
-                      fontSize: 14, fontWeight: 700, color: C.accentPrimary,
-                      background: C.accentPrimary + "15", padding: "2px 10px", borderRadius: 12
-                    }}>{advancedSettings.itemsPerUnit} 件</span>
-                    <label style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      padding: "4px 10px",
-                      borderRadius: 999,
-                      border: `1px solid ${C.accentPrimary}24`,
-                      background: `${C.accentPrimary}12`,
-                      color: C.accentPrimary,
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}>
-                      <span>上限</span>
-                      <input
-                        type="number"
-                        min={ITEMS_PER_UNIT_MIN}
-                        value={itemsPerUnitMax}
-                        onChange={(e) => handleAdvancedChange('itemsPerUnitMax', parseInt(e.target.value || `${ITEMS_PER_UNIT_MIN}`, 10))}
-                        style={{
-                          width: 32,
-                          padding: 0,
-                          border: "none",
-                          fontSize: 12,
-                          fontWeight: 700,
-                          color: C.accentPrimary,
-                          background: "transparent",
-                          outline: "none",
-                          textAlign: "center",
-                          MozAppearance: "textfield",
-                        }}
-                      />
-                    </label>
+
+                  <div style={{ marginTop: 10, padding: "12px", borderRadius: 14, border: `1px solid ${C.border}`, background: C.bgPrimary }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                      <div>
+                        <div style={{ fontSize: 13, color: C.textPrimary, fontWeight: 700 }}>AI 创意程度</div>
+                        <div style={{ fontSize: 11, color: C.textSecondary, marginTop: 3 }}>数值越高，方案表达越发散</div>
+                      </div>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: C.accentPrimary, background: C.accentPrimary + "15", padding: "3px 10px", borderRadius: 12 }}>
+                        {(advancedSettings.temperature ?? 0.9).toFixed(1)}
+                        <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 4 }}>
+                          ({(advancedSettings.temperature ?? 0.9) < 0.5 ? "保守" : (advancedSettings.temperature ?? 0.9) > 0.8 ? "创意" : "平衡"})
+                        </span>
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={1.0}
+                      step={0.1}
+                      value={advancedSettings.temperature ?? 0.9}
+                      onChange={(e) => handleAdvancedChange('temperature', parseFloat(e.target.value))}
+                      style={{
+                        width: "100%",
+                        accentColor: C.accentPrimary,
+                        cursor: "pointer",
+                        height: 6,
+                        borderRadius: 3,
+                        background: `linear-gradient(to right, ${C.accentPrimary} 0%, ${C.accentPrimary} ${getSliderFillPercentage(advancedSettings.temperature ?? 0.9, 0.1, 1.0)}%, ${C.sliderTrack || C.border} ${getSliderFillPercentage(advancedSettings.temperature ?? 0.9, 0.1, 1.0)}%, ${C.sliderTrack || C.border} 100%)`,
+                      }}
+                    />
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.textSecondary, marginTop: 4 }}>
+                      <span>保守</span>
+                      <span>平衡</span>
+                      <span>创意</span>
+                    </div>
                   </div>
-                </div>
-                <input 
-                  type="range" 
-                  min={ITEMS_PER_UNIT_MIN} 
-                  max={itemsPerUnitMax} 
-                  value={advancedSettings.itemsPerUnit}
-                  onChange={(e) => handleAdvancedChange('itemsPerUnit', parseInt(e.target.value))}
-                  style={{ 
-                    width: "100%", 
-                    accentColor: C.accentPrimary,
-                    cursor: "pointer",
-                    height: 6,
-                    borderRadius: 3,
-                    background: `linear-gradient(to right, ${C.accentPrimary} 0%, ${C.accentPrimary} ${getSliderFillPercentage(advancedSettings.itemsPerUnit, ITEMS_PER_UNIT_MIN, itemsPerUnitMax)}%, ${C.sliderTrack || C.border} ${getSliderFillPercentage(advancedSettings.itemsPerUnit, ITEMS_PER_UNIT_MIN, itemsPerUnitMax)}%, ${C.sliderTrack || C.border} 100%)`,
-                  }} 
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.textSecondary, marginTop: 4 }}>
-                  <span>{ITEMS_PER_UNIT_MIN}</span><span>{itemsPerUnitMax}</span>
-                </div>
-              </div>
-              
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <span style={{ fontSize: 13, color: C.textPrimary }}>AI 创意程度</span>
-                  <span style={{ 
-                    fontSize: 14, fontWeight: 700, color: C.accentPrimary,
-                    background: C.accentPrimary + "15", padding: "2px 10px", borderRadius: 12
-                  }}>{(advancedSettings.temperature ?? 0.9).toFixed(1)} 
-                    <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 4 }}>
-                      ({(advancedSettings.temperature ?? 0.9) < 0.5 ? "保守" : (advancedSettings.temperature ?? 0.9) > 0.8 ? "创意" : "平衡"})
-                    </span>
-                  </span>
-                </div>
-                <input 
-                  type="range" 
-                  min={0.1} 
-                  max={1.0} 
-                  step={0.1}
-                  value={advancedSettings.temperature ?? 0.9}
-                  onChange={(e) => handleAdvancedChange('temperature', parseFloat(e.target.value))}
-                  style={{ 
-                    width: "100%", 
-                    accentColor: C.accentPrimary,
-                    cursor: "pointer",
-                    height: 6,
-                    borderRadius: 3,
-                    background: `linear-gradient(to right, ${C.accentPrimary} 0%, ${C.accentPrimary} ${((advancedSettings.temperature - 0.1) / 0.9) * 100}%, ${C.sliderTrack || C.border} ${((advancedSettings.temperature - 0.1) / 0.9) * 100}%, ${C.sliderTrack || C.border} 100%)`,
-                  }} 
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.textSecondary, marginTop: 4 }}>
-                  <span>保守</span>
-                  <span>平衡</span>
-                  <span>创意</span>
-                </div>
-              </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div style={{ flex: 2, display: "flex", flexDirection: "column" }}>
-          <div>
-            <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+        <div style={{ flex: 2, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 13, marginBottom: 8, color: C.textPrimary }}>
               补充策展意图（可选）
             </label>
+            <div style={{ fontSize: 12, color: C.textSecondary, marginBottom: 8 }}>
+              用自然语言补充策展重点、希望凸显的视角，以及希望规避的内容。
+            </div>
             <textarea
               placeholder="用自然语言描述您的策展思路、希望强调的重点、希望规避的内容等……
 
@@ -991,16 +1282,17 @@ export const PageP1 = ({
               value={additionalIntent}
               onChange={(e) => setAdditionalIntent(e.target.value)}
               style={{
-                width: "100%", padding: "10px 14px", borderRadius: 6, resize: "vertical",
-                border: `1px solid ${C.border}`, fontSize: 13, fontFamily: "'Noto Sans SC', sans-serif",
-                outline: "none", boxSizing: "border-box", background: "#fff", color: C.textPrimary,
-              }} 
+                width: "100%", minHeight: 220, flex: 1, padding: "12px 14px", borderRadius: 14, resize: "vertical",
+                border: `1px solid ${C.border}`, fontSize: 13, fontFamily: "var(--font-ui)",
+                outline: "none", boxSizing: "border-box", background: C.bgElevated || "#fff", color: C.textPrimary,
+                boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.03)",
+              }}
             />
             <div style={{ color: C.textSecondary, fontSize: 11, textAlign: "right", marginTop: 4 }}>
               {additionalIntent.length} / 500
             </div>
           </div>
-          <div style={{ marginTop: "auto", paddingTop: 16 }}>
+          <div style={{ marginTop: 16 }}>
             <RhythmDesigner
               C={C}
               value={narrativeRhythm}
@@ -1011,7 +1303,12 @@ export const PageP1 = ({
       </div>
 
       <div style={{
-        marginTop: 28, background: "#F3F3F1", borderRadius: 6, padding: "12px 16px",
+        marginTop: 30,
+        background: C.bgElevated || "#F3F3F1",
+        borderRadius: 18,
+        padding: "16px 18px",
+        border: `1px solid ${C.border}`,
+        boxShadow: C.shadowSm,
         display: "flex", flexDirection: "column", gap: 6,
       }}>
         <div style={{ fontSize: 12, color: C.textSecondary, display: "flex", alignItems: "center", gap: 6 }}>
@@ -1028,26 +1325,47 @@ export const PageP1 = ({
         </div>
       </div>
 
-      <div style={{ marginTop: 28 }}>
-        <Btn 
-          disabled={!uploaded || !uploadedExhibits.length || isGenerating} 
+      <div style={{
+        marginTop: 30,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 16,
+        padding: "18px 20px",
+        borderRadius: 18,
+        border: `1px solid ${C.border}`,
+        background: C.bgElevated || C.bgSecondary,
+        boxShadow: C.shadowSm,
+      }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.textPrimary, marginBottom: 4 }}>
+            准备开始生成策展大纲
+          </div>
+          <div style={{ fontSize: 12, color: C.textSecondary, lineHeight: 1.6 }}>
+            系统会基于展品清单、策展意图、生成参数和叙事节奏，生成叙事方向与后续大纲。
+          </div>
+        </div>
+        <Btn
+          disabled={(!uploaded || !uploadedExhibits.length || isGenerating) && isLoggedIn}
           onClick={handleStartGeneration}
+          style={{ minWidth: 188 }}
         >
-          {isGenerating ? '正在生成中...' : '开始生成策展大纲 →'}
+          {!isLoggedIn ? '登录后生成策展大纲' : isGenerating ? '正在生成中...' : '开始生成策展大纲 →'}
         </Btn>
-        
+
         {isGenerating && (
-          <div style={{ 
-            position: "fixed", inset: 0, background: "rgba(255,255,255,.9)",
+          <div style={{
+            position: "fixed", inset: 0, background: C.overlay,
             display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            zIndex: 300
+            zIndex: 300,
+            backdropFilter: "blur(6px)",
           }}>
-            <div style={{ 
-              width: 48, 
-              height: 48, 
-              border: `4px solid ${C.border}`, 
+            <div style={{
+              width: 48,
+              height: 48,
+              border: `4px solid ${C.border}`,
               borderTopColor: C.accentPrimary,
-              borderRadius: '50%', 
+              borderRadius: '50%',
               animation: 'spin 1s linear infinite'
             }} />
             <style>{`
@@ -1080,20 +1398,34 @@ export const PageP1 = ({
                 <thead>
                   <tr style={{ background: C.bgPrimary, borderBottom: `1px solid ${C.border}` }}>
                     <th style={{ padding: "10px 12px", textAlign: "left", color: C.textSecondary, fontWeight: 600 }}>序号</th>
-                    <th style={{ padding: "10px 12px", textAlign: "left", color: C.textSecondary, fontWeight: 600 }}>名称</th>
-                    <th style={{ padding: "10px 12px", textAlign: "left", color: C.textSecondary, fontWeight: 600 }}>年代</th>
+                    <th style={{ padding: "10px 12px", textAlign: "left", color: C.textSecondary, fontWeight: 600 }}>缩略图</th>
+                    <th style={{ padding: "10px 12px", textAlign: "left", color: C.textSecondary, fontWeight: 600 }}>展品名称</th>
+                    <th style={{ padding: "10px 12px", textAlign: "left", color: C.textSecondary, fontWeight: 600 }}>时间</th>
+                    <th style={{ padding: "10px 12px", textAlign: "left", color: C.textSecondary, fontWeight: 600 }}>地点</th>
                     <th style={{ padding: "10px 12px", textAlign: "left", color: C.textSecondary, fontWeight: 600 }}>材质</th>
-                    <th style={{ padding: "10px 12px", textAlign: "left", color: C.textSecondary, fontWeight: 600 }}>尺寸</th>
+                    <th style={{ padding: "10px 12px", textAlign: "left", color: C.textSecondary, fontWeight: 600 }}>其他</th>
                   </tr>
                 </thead>
                 <tbody>
                   {uploadedExhibits.slice(0, 20).map((ex, i) => (
                     <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
                       <td style={{ padding: "10px 12px", color: C.textSecondary }}>{i + 1}</td>
-                      <td style={{ padding: "10px 12px", color: C.textPrimary, fontWeight: 600 }}>{ex.名称 || ex.name || ex.品名 || '-'}</td>
-                      <td style={{ padding: "10px 12px", color: C.textPrimary }}>{ex.年代 || ex.era || '-'}</td>
-                      <td style={{ padding: "10px 12px", color: C.textPrimary }}>{ex.材质 || ex.material || '-'}</td>
-                      <td style={{ padding: "10px 12px", color: C.textSecondary, fontSize: 12 }}>{ex.尺寸 || ex.size || '-'}</td>
+                      <td style={{ padding: "10px 12px" }}>
+                        {getExhibitImage(ex) ? (
+                          <img
+                            src={getExhibitImage(ex)}
+                            alt={getExhibitName(ex)}
+                            style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 8, border: `1px solid ${C.border}` }}
+                          />
+                        ) : (
+                          <span style={{ color: C.textSecondary }}>-</span>
+                        )}
+                      </td>
+                      <td style={{ padding: "10px 12px", color: C.textPrimary, fontWeight: 600 }}>{getExhibitName(ex) || '-'}</td>
+                      <td style={{ padding: "10px 12px", color: C.textPrimary }}>{getExhibitTime(ex) || '-'}</td>
+                      <td style={{ padding: "10px 12px", color: C.textPrimary }}>{getExhibitPlace(ex) || '-'}</td>
+                      <td style={{ padding: "10px 12px", color: C.textPrimary }}>{getExhibitMaterial(ex) || '-'}</td>
+                      <td style={{ padding: "10px 12px", color: C.textSecondary, fontSize: 12 }}>{getExhibitOther(ex) || '-'}</td>
                     </tr>
                   ))}
                 </tbody>
