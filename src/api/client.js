@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+// 生产环境默认同源访问 API；开发环境由 Vite proxy 负责转发。
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 const EXHIBIT_PARSE_START_TIMEOUT = 30 * 60 * 1000;
 const EXHIBIT_PARSE_POLL_INTERVAL_MS = 1200;
 const AUTH_STORAGE_KEY = 'curation_auth_session';

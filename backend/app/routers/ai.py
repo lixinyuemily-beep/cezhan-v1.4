@@ -2,7 +2,7 @@
 AI API 路由 - 元景大模型调用
 """
 import json
-from typing import List, Dict, Any, Optional
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 from ..models.schemas import (
     NarrativeRequest, NarrativeResponse,
@@ -13,7 +13,7 @@ from ..models.schemas import (
     TextSectionResponse as TextSectionResp,
     OutlineRequest, OutlineResponse
 )
-from ..services import ai_service
+from ..services.ai_service import ai_service
 
 router = APIRouter(prefix="/ai", tags=["AI"])
 

@@ -6,7 +6,7 @@ from fastapi import APIRouter, File, Header, HTTPException, Query, UploadFile
 from ..models.schemas import (
     ExhibitCreate, ExhibitUpdate, ExhibitResponse, MessageResponse
 )
-from ..services.database import db
+from ..services.database_exhibits_service import exhibits_db
 from ..services.exhibit_import_service import exhibit_import_service
 from ..services.request_user_service import request_user_service
 from ..services.storage_service import storage_service
@@ -37,7 +37,7 @@ async def get_exhibits(
     """获取展品列表"""
     try:
         effective_user_id = _require_authenticated_user_id(authorization, user_id)
-        exhibits = db.get_exhibits(project_id, unit_id, effective_user_id)
+        exhibits = exhibits_db.get_exhibits(project_id, unit_id, effective_user_id)
         return exhibits
     except HTTPException:
         raise
@@ -53,7 +53,7 @@ async def get_all_exhibits(
     """获取当前用户的展品知识库"""
     try:
         effective_user_id = _require_authenticated_user_id(authorization, user_id)
-        exhibits = db.get_all_exhibits(effective_user_id)
+        exhibits = exhibits_db.get_all_exhibits(effective_user_id)
         return exhibits
     except HTTPException:
         raise
@@ -69,14 +69,14 @@ async def delete_all_exhibits(
     """清空当前用户所有展品"""
     try:
         effective_user_id = _require_authenticated_user_id(authorization, user_id)
-        exhibits = db.get_all_exhibits(effective_user_id)
+        exhibits = exhibits_db.get_all_exhibits(effective_user_id)
         storage_paths = [
             path for exhibit in exhibits
             for path in (exhibit.get("storage_path"), exhibit.get("thumbnail_storage_path"))
             if path
         ]
         storage_service.remove_files(storage_paths)
-        db.delete_all_exhibits(effective_user_id)
+        exhibits_db.delete_all_exhibits(effective_user_id)
         return {"success": True, "message": "已清空所有展品"}
     except HTTPException:
         raise
@@ -93,7 +93,7 @@ async def search_exhibits(
     """搜索展品"""
     try:
         effective_user_id = _require_authenticated_user_id(authorization, user_id)
-        exhibits = db.search_exhibits(keyword, effective_user_id)
+        exhibits = exhibits_db.search_exhibits(keyword, effective_user_id)
         return exhibits
     except HTTPException:
         raise
@@ -131,7 +131,7 @@ async def get_exhibit(
 ):
     """获取单个展品"""
     effective_user_id = _require_authenticated_user_id(authorization, user_id)
-    exhibit = db.get_exhibit(exhibit_id, effective_user_id)
+    exhibit = exhibits_db.get_exhibit(exhibit_id, effective_user_id)
     if not exhibit:
         raise HTTPException(status_code=404, detail="展品不存在")
     return exhibit
@@ -148,7 +148,7 @@ async def create_exhibit(
         effective_user_id = _require_authenticated_user_id(authorization, exhibit.user_id or user_id)
         exhibit_data = exhibit.model_dump()
         exhibit_data["user_id"] = effective_user_id
-        new_exhibit = db.create_exhibit(exhibit_data)
+        new_exhibit = exhibits_db.create_exhibit(exhibit_data)
         return new_exhibit
     except HTTPException:
         raise
@@ -167,7 +167,7 @@ async def update_exhibit(
     try:
         effective_user_id = _require_authenticated_user_id(authorization, user_id)
         update_data = {k: v for k, v in exhibit.model_dump().items() if v is not None}
-        updated = db.update_exhibit(exhibit_id, update_data, effective_user_id)
+        updated = exhibits_db.update_exhibit(exhibit_id, update_data, effective_user_id)
         if not updated:
             raise HTTPException(status_code=404, detail="展品不存在")
         return updated
@@ -186,11 +186,11 @@ async def delete_exhibit(
     """删除展品"""
     try:
         effective_user_id = _require_authenticated_user_id(authorization, user_id)
-        exhibit = db.get_exhibit(exhibit_id, effective_user_id)
+        exhibit = exhibits_db.get_exhibit(exhibit_id, effective_user_id)
         if not exhibit:
             raise HTTPException(status_code=404, detail="展品不存在")
         storage_service.remove_files([exhibit.get("storage_path"), exhibit.get("thumbnail_storage_path")])
-        success = db.delete_exhibit(exhibit_id, effective_user_id)
+        success = exhibits_db.delete_exhibit(exhibit_id, effective_user_id)
         if not success:
             raise HTTPException(status_code=404, detail="展品不存在")
         return MessageResponse(message="展品删除成功")
@@ -213,7 +213,7 @@ async def create_exhibits_batch(
         for exhibit in exhibits:
             exhibit_data = exhibit.model_dump()
             exhibit_data["user_id"] = effective_user_id
-            new_exhibit = db.create_exhibit(exhibit_data)
+            new_exhibit = exhibits_db.create_exhibit(exhibit_data)
             if new_exhibit:
                 created.append(new_exhibit)
         return created

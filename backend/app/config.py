@@ -9,6 +9,7 @@ from pydantic_settings import BaseSettings
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = BACKEND_ROOT.parent
 load_dotenv(BACKEND_ROOT / ".env")
 
 
@@ -28,8 +29,17 @@ class Settings(BaseSettings):
     # FastAPI配置
     app_name: str = "策展智能助手 API"
     debug: bool = os.getenv("DEBUG", "true").lower() == "true"
-    cors_origins: list = ["http://localhost:5173", "http://localhost:5174"]
+    cors_origins: list = [
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:5173,http://localhost:5174,http://localhost:8000",
+        ).split(",")
+        if origin.strip()
+    ]
     app_public_base_url: str = os.getenv("APP_PUBLIC_BASE_URL", "http://localhost:8000")
+    serve_frontend: bool = os.getenv("SERVE_FRONTEND", "true").lower() == "true"
+    frontend_dist_dir: str = os.getenv("FRONTEND_DIST_DIR", str(PROJECT_ROOT / "dist"))
 
     # 自建认证配置
     auth_token_secret: str = os.getenv("AUTH_TOKEN_SECRET", "change-me-in-production")

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Header, HTTPException
 
 from ..config import settings
 from ..models.schemas import EmailAuthRequest, EmailOtpVerifyRequest
-from ..services.database import db
+from ..services.database_auth_service import auth_db
 from ..services.email_service import email_service
 from ..services.session_service import SessionService
 
@@ -63,7 +63,7 @@ async def send_code(payload: EmailAuthRequest):
         email = normalize_email(payload.email)
         code = f"{secrets.randbelow(1000000):06d}"
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.email_code_expires_minutes)
-        db.create_email_verification_code({
+        auth_db.create_email_verification_code({
             "email": email,
             "code_hash": hash_verification_code(email, code),
             "expires_at": expires_at.isoformat(),
@@ -94,7 +94,7 @@ async def verify_code(payload: EmailOtpVerifyRequest):
         if not code:
             raise HTTPException(status_code=400, detail="请输入验证码")
 
-        latest_code = db.get_latest_email_verification_code(email)
+        latest_code = auth_db.get_latest_email_verification_code(email)
         if not latest_code:
             raise HTTPException(status_code=400, detail="请先获取验证码")
 
@@ -105,15 +105,15 @@ async def verify_code(payload: EmailOtpVerifyRequest):
         if latest_code.get("code_hash") != hash_verification_code(email, code):
             raise HTTPException(status_code=400, detail="验证码不正确")
 
-        db.mark_email_verification_code_used(latest_code["id"])
+        auth_db.mark_email_verification_code_used(latest_code["id"])
 
         now = datetime.now(timezone.utc).isoformat()
-        user = db.get_app_user_by_email(email)
+        user = auth_db.get_app_user_by_email(email)
         if user:
-            user = db.update_app_user(user["id"], {"email": email, "last_sign_in_at": now})
+            user = auth_db.update_app_user(user["id"], {"email": email, "last_sign_in_at": now})
         else:
             email_name = email.split("@", 1)[0][:20] or "用户"
-            user = db.create_app_user({
+            user = auth_db.create_app_user({
                 "email": email,
                 "display_name": email_name,
                 "last_sign_in_at": now,
@@ -141,7 +141,7 @@ async def me(authorization: Optional[str] = Header(None)):
 
     try:
         payload = SessionService.verify_access_token(token)
-        user = db.get_app_user_by_id(payload.get("sub"))
+        user = auth_db.get_app_user_by_id(payload.get("sub"))
         if not user:
             raise HTTPException(status_code=401, detail="登录状态已失效")
         return {"user": serialize_user(user)}

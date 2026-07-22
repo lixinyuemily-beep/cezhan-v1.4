@@ -7,7 +7,7 @@ from typing import Iterable, List
 from storage3.types import CreateOrUpdateBucketOptions, FileOptions
 
 from ..config import settings
-from .database import DatabaseService
+from .database import DatabaseClientProvider
 
 
 class StorageService:
@@ -32,7 +32,7 @@ class StorageService:
             if cls._bucket_ready:
                 return
 
-            client = DatabaseService.get_client()
+            client = DatabaseClientProvider.get_client()
             bucket_name = cls._bucket_name()
             options = CreateOrUpdateBucketOptions(public=settings.supabase_storage_public)
 
@@ -48,7 +48,7 @@ class StorageService:
     @classmethod
     def upload_bytes(cls, path: str, content: bytes, content_type: str) -> str:
         cls.ensure_bucket_ready()
-        client = DatabaseService.get_client()
+        client = DatabaseClientProvider.get_client()
         normalized_path = str(path or "").strip().lstrip("/")
         if not normalized_path:
             raise ValueError("Storage path 不能为空")
@@ -75,7 +75,7 @@ class StorageService:
 
         try:
             cls.ensure_bucket_ready()
-            DatabaseService.get_client().storage.from_(cls._bucket_name()).remove(normalized_paths)
+            DatabaseClientProvider.get_client().storage.from_(cls._bucket_name()).remove(normalized_paths)
         except Exception:
             # 清理失败不影响主流程，只避免额外抛错覆盖原始异常。
             return
